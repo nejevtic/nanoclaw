@@ -156,7 +156,11 @@ function buildVolumeMounts(
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  if (fs.existsSync(agentRunnerSrc)) {
+    // Always sync so source changes (e.g. upgrades) propagate to existing groups.
+    if (fs.existsSync(groupAgentRunnerDir)) {
+      fs.rmSync(groupAgentRunnerDir, { recursive: true });
+    }
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
@@ -183,7 +187,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
