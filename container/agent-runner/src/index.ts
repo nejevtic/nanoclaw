@@ -8,7 +8,7 @@
  * IPC: same as before (poll /workspace/ipc/input/ for follow-up messages)
  */
 
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -63,6 +63,18 @@ interface OllamaResponse {
 interface HistoryFile {
   sessionId: string;
   messages: ChatMessage[];
+}
+
+interface BackendConfig {
+  type: 'ollama' | 'anthropic' | 'gemini';
+  // Ollama
+  ollamaBaseUrl: string;
+  ollamaModel: string;
+  // Anthropic (Claude Agent SDK — uses OAuth token, no API credits required)
+  oauthToken: string;
+  // Gemini
+  geminiApiKey: string;
+  geminiModel: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -559,14 +571,145 @@ async function callOllama(
 }
 
 // ---------------------------------------------------------------------------
+// Gemini (OpenAI-compatible endpoint)
+// ---------------------------------------------------------------------------
+
+async function callGemini(
+  apiKey: string,
+  model: string,
+  messages: ChatMessage[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: any[],
+): Promise<OllamaResponse> {
+  const res = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ model, messages, tools, stream: false }),
+    },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Gemini ${res.status}: ${body.slice(0, 400)}`);
+  }
+
+  return res.json() as Promise<OllamaResponse>;
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic — Claude CLI subprocess (--print mode, uses CLAUDE_CODE_OAUTH_TOKEN)
+// ---------------------------------------------------------------------------
+
+const CLAUDE_CLI = '/app/node_modules/@anthropic-ai/claude-code/cli.js';
+
+async function spawnClaude(
+  args: string[],
+  oauthToken: string,
+): Promise<{ result: string | null; sessionId: string | undefined }> {
+  return new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      // Clear API key so the CLI uses OAuth (not paid API credits)
+      ANTHROPIC_API_KEY: '',
+      ...(oauthToken ? { CLAUDE_CODE_OAUTH_TOKEN: oauthToken } : {}),
+    };
+
+    const proc = spawn('node', [CLAUDE_CLI, ...args], {
+      cwd: '/workspace/group',
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d: Buffer) => {
+      const line = d.toString().trim();
+      if (line) log(`[claude-cli] ${line.slice(0, 200)}`);
+    });
+
+    proc.on('error', reject);
+    proc.on('close', () => {
+      try {
+        const parsed = JSON.parse(stdout.trim());
+        // Accept success or treat is_error=false as success
+        if (parsed.subtype === 'success' || parsed.is_error === false) {
+          resolve({
+            result: parsed.result ?? null,
+            sessionId: parsed.session_id ?? parsed.sessionId,
+          });
+        } else {
+          reject(new Error(`Claude CLI: ${parsed.subtype ?? 'unknown'} — ${(parsed.result ?? '').slice(0, 200)}`));
+        }
+      } catch (err) {
+        reject(new Error(`Claude CLI parse error: ${err} | stdout: ${stdout.slice(0, 300)}`));
+      }
+    });
+  });
+}
+
+async function runQueryWithClaudeSDK(
+  prompt: string,
+  sessionId: string | undefined,
+  oauthToken: string,
+  input: ContainerInput,
+): Promise<{ newSessionId: string; closedDuringQuery: boolean; pendingIpc: string[] }> {
+  let closedDuringQuery = false;
+  const ipcBuffer: string[] = [];
+
+  // IPC polling — set flag if close sentinel appears
+  let ipcDone = false;
+  const pollIpc = () => {
+    if (ipcDone) return;
+    if (shouldClose()) { closedDuringQuery = true; return; }
+    ipcBuffer.push(...drainIpcInput());
+    setTimeout(pollIpc, IPC_POLL_MS);
+  };
+  setTimeout(pollIpc, IPC_POLL_MS);
+
+  const now = new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' });
+  const baseArgs = [
+    '--print',
+    '--output-format', 'json',
+    '--dangerously-skip-permissions',
+    '--append-system-prompt', `Current date/time: ${now}`,
+    '-p', prompt,
+  ];
+
+  try {
+    // Try resuming existing session; on failure fall back to new session
+    let run: { result: string | null; sessionId: string | undefined };
+    if (sessionId) {
+      try {
+        run = await spawnClaude([...baseArgs, '--resume', sessionId], oauthToken);
+      } catch (err) {
+        log(`Resume failed (${err}), starting fresh session`);
+        run = await spawnClaude(baseArgs, oauthToken);
+      }
+    } else {
+      run = await spawnClaude(baseArgs, oauthToken);
+    }
+
+    const newSessionId = run.sessionId ?? crypto.randomUUID();
+    writeOutput({ status: 'success', result: run.result, newSessionId });
+    return { newSessionId, closedDuringQuery, pendingIpc: [...ipcBuffer, ...drainIpcInput()] };
+  } finally {
+    ipcDone = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Single query: send prompt → tool-call loop → return final text
 // ---------------------------------------------------------------------------
 
 async function runQuery(
   prompt: string,
   sessionId: string | undefined,
-  ollamaBaseUrl: string,
-  ollamaModel: string,
+  backend: BackendConfig,
   input: ContainerInput,
 ): Promise<{ newSessionId: string; closedDuringQuery: boolean; pendingIpc: string[] }> {
   const { messages: history, sessionId: activeSessionId } = loadHistory(sessionId);
@@ -598,8 +741,10 @@ async function runQuery(
 
   try {
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-      log(`Ollama call ${i + 1} (${messages.length} messages)...`);
-      const res    = await callOllama(ollamaBaseUrl, ollamaModel, messages, tools);
+      log(`LLM call ${i + 1} [${backend.type}] (${messages.length} messages)...`);
+      const res = backend.type === 'gemini'
+        ? await callGemini(backend.geminiApiKey, backend.geminiModel, messages, tools)
+        : await callOllama(backend.ollamaBaseUrl, backend.ollamaModel, messages, tools);
       const choice = res.choices[0];
       if (!choice) throw new Error('Ollama returned no choices');
 
@@ -669,11 +814,23 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const secrets      = input.secrets || {};
+  const secrets       = input.secrets || {};
+  const activeBackend = secrets.ACTIVE_BACKEND === 'anthropic' ? 'anthropic'
+                      : secrets.ACTIVE_BACKEND === 'gemini'    ? 'gemini'
+                      : 'ollama';
   const ollamaBaseUrl = secrets.OLLAMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-  const ollamaModel   = secrets.OLLAMA_MODEL   || process.env.OLLAMA_MODEL   || 'gpt-oss:latest';
+  const ollamaModel   = secrets.OLLAMA_MODEL    || process.env.OLLAMA_MODEL    || 'gpt-oss:latest';
+  const oauthToken    = secrets.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
+  const geminiApiKey  = secrets.GEMINI_API_KEY  || process.env.GEMINI_API_KEY  || '';
+  const geminiModel   = secrets.GEMINI_MODEL    || process.env.GEMINI_MODEL    || 'gemini-2.0-flash';
 
-  log(`Ollama: ${ollamaBaseUrl}  model: ${ollamaModel}`);
+  const backend: BackendConfig = {
+    type: activeBackend, ollamaBaseUrl, ollamaModel, oauthToken, geminiApiKey, geminiModel,
+  };
+  const activeModel = activeBackend === 'gemini' ? geminiModel
+                    : activeBackend === 'anthropic' ? '(claude-code-sdk)'
+                    : ollamaModel;
+  log(`Backend: ${activeBackend} | model: ${activeModel}`);
 
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
   try { fs.unlinkSync(IPC_CLOSE_SENTINEL); } catch { /* ignore */ }
@@ -691,7 +848,9 @@ async function main(): Promise<void> {
   try {
     while (true) {
       log(`Query start (session: ${sessionId || 'new'})`);
-      const result = await runQuery(prompt, sessionId, ollamaBaseUrl, ollamaModel, input);
+      const result = backend.type === 'anthropic'
+        ? await runQueryWithClaudeSDK(prompt, sessionId, backend.oauthToken, input)
+        : await runQuery(prompt, sessionId, backend, input);
       sessionId = result.newSessionId;
 
       if (result.closedDuringQuery) {

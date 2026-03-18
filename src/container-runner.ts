@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -16,6 +17,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
+import { getRouterState } from './db.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
@@ -183,11 +185,42 @@ function buildVolumeMounts(
 }
 
 /**
+ * Read the OAuth access token live from ~/.claude/.credentials.json.
+ * This is always up-to-date (the refresh timer keeps the file current).
+ */
+function readOauthTokenFromCredentials(): string {
+  const credFile = path.join(os.homedir(), '.claude', '.credentials.json');
+  try {
+    const creds = JSON.parse(fs.readFileSync(credFile, 'utf-8'));
+    const token = creds?.claudeAiOauth?.accessToken;
+    return typeof token === 'string' ? token : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'OLLAMA_BASE_URL', 'OLLAMA_MODEL']);
+  const secrets = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OLLAMA_BASE_URL',
+    'OLLAMA_MODEL',
+    'GEMINI_API_KEY',
+    'GEMINI_MODEL',
+  ]);
+  // Prefer live credentials file over .env for OAuth token — it is kept
+  // current by the nanoclaw-token-refresh systemd timer.
+  const liveToken = readOauthTokenFromCredentials();
+  if (liveToken) {
+    secrets.CLAUDE_CODE_OAUTH_TOKEN = liveToken;
+  }
+  // Active backend is toggled at runtime via /backend command and stored in DB
+  secrets.ACTIVE_BACKEND = getRouterState('active_backend') || 'ollama';
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {

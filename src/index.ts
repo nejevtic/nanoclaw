@@ -26,6 +26,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getActiveProject,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -45,6 +46,22 @@ import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+function buildProjectContext(chatJid: string): string {
+  const projectName = getActiveProject(chatJid);
+  if (!projectName) return '';
+  try {
+    const projectsFile = path.join(process.cwd(), 'workspace', 'projects.json');
+    const projects = JSON.parse(fs.readFileSync(projectsFile, 'utf-8')).projects as Array<{
+      name: string; displayName: string; containerPath: string; description: string;
+    }>;
+    const project = projects.find((p) => p.name === projectName);
+    if (!project) return '';
+    return `<active_project name="${project.name}" path="/workspace/extra/${project.containerPath}">${project.description}</active_project>\n`;
+  } catch {
+    return '';
+  }
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -144,7 +161,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  const projectContext = buildProjectContext(chatJid);
+  const prompt = projectContext + formatMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.

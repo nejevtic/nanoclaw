@@ -479,6 +479,25 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
+export function getActiveBackend(): 'ollama' | 'anthropic' | 'gemini' {
+  const val = getRouterState('active_backend');
+  if (val === 'anthropic') return 'anthropic';
+  if (val === 'gemini') return 'gemini';
+  return 'ollama';
+}
+
+export function setActiveBackend(backend: 'ollama' | 'anthropic' | 'gemini'): void {
+  setRouterState('active_backend', backend);
+}
+
+export function getActiveProject(chatJid: string): string | null {
+  return getRouterState(`active_project:${chatJid}`) || null;
+}
+
+export function setActiveProject(chatJid: string, projectName: string | null): void {
+  setRouterState(`active_project:${chatJid}`, projectName ?? '');
+}
+
 // --- Session accessors ---
 
 export function getSession(groupFolder: string): string | undefined {

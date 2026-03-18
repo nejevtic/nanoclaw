@@ -1,7 +1,28 @@
+import fs from 'fs';
+import path from 'path';
+
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { getActiveBackend, setActiveBackend, getActiveProject, setActiveProject } from '../db.js';
 import { logger } from '../logger.js';
+
+interface ProjectEntry {
+  name: string;
+  displayName: string;
+  containerPath: string;
+  description: string;
+}
+
+function loadProjects(): ProjectEntry[] {
+  const projectsFile = path.join(process.cwd(), 'workspace', 'projects.json');
+  try {
+    const raw = fs.readFileSync(projectsFile, 'utf-8');
+    return (JSON.parse(raw).projects as ProjectEntry[]) || [];
+  } catch {
+    return [];
+  }
+}
 import {
   Channel,
   OnChatMetadata,
@@ -127,6 +148,74 @@ export class TelegramChannel implements Channel {
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to switch AI backend at runtime
+    this.bot.command('backend', (ctx) => {
+      const arg = ctx.match?.trim().toLowerCase() || '';
+
+      if (!arg) {
+        const current = getActiveBackend();
+        ctx.reply(
+          `Current backend: *${current}*\n\nSwitch with:\n/backend ollama\n/backend anthropic\n/backend gemini`,
+          { parse_mode: 'Markdown' },
+        );
+        return;
+      }
+
+      if (arg !== 'ollama' && arg !== 'anthropic' && arg !== 'gemini') {
+        ctx.reply(`Unknown backend "${arg}". Use: ollama, anthropic, or gemini`);
+        return;
+      }
+
+      setActiveBackend(arg);
+      logger.info({ backend: arg }, 'Backend switched via /backend command');
+      ctx.reply(`Switched to *${arg}* backend. Takes effect on next message.`, { parse_mode: 'Markdown' });
+    });
+
+    // Register one command per project (e.g. /swissvibe) plus /project off
+    const projects = loadProjects();
+    for (const project of projects) {
+      this.bot.command(project.name, (ctx) => {
+        const chatJid = `tg:${ctx.chat.id}`;
+        setActiveProject(chatJid, project.name);
+        logger.info({ project: project.name, chatJid }, 'Active project set');
+        ctx.reply(
+          `Active project set to *${project.displayName}*\n\n${project.description}\n\nAll coding and git questions will now refer to this project.`,
+          { parse_mode: 'Markdown' },
+        );
+      });
+    }
+
+    this.bot.command('project', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const arg = ctx.match?.trim().toLowerCase() || '';
+
+      if (arg === 'off' || arg === 'none') {
+        setActiveProject(chatJid, null);
+        ctx.reply('Active project cleared. No project context will be injected.');
+        return;
+      }
+
+      const current = getActiveProject(chatJid);
+      const projectList = loadProjects();
+      const currentProject = projectList.find((p) => p.name === current);
+
+      if (!arg) {
+        const lines = ['*Available projects:*'];
+        for (const p of projectList) {
+          const marker = p.name === current ? ' ✓' : '';
+          lines.push(`• /${p.name} — ${p.displayName}${marker}`);
+        }
+        lines.push('');
+        lines.push(current && currentProject
+          ? `Active: *${currentProject.displayName}*`
+          : 'No active project. Use /\\<name\\> to set one.');
+        ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
+        return;
+      }
+
+      ctx.reply(`Unknown project "${arg}". Use /project to see available projects.`);
     });
 
     this.bot.on('message:text', async (ctx) => {
