@@ -877,8 +877,11 @@ async function main(): Promise<void> {
       }
       if (!result || !succeededBackend) throw lastErr ?? new Error('All backends failed');
 
-      // For subsequent turns, start from the backend that just worked
-      preferredChain = [succeededBackend, ...fallbackChain.filter(b => b.type !== succeededBackend!.type)];
+      // Drop any backends that failed this turn — don't retry them later in the session.
+      // This keeps us on the same working backend until it fails, then we permanently
+      // move to the next one (no flip-flopping back to a previously-bad backend).
+      const succeededIdx = preferredChain.indexOf(succeededBackend);
+      preferredChain = preferredChain.slice(succeededIdx);
 
       sessionId = result.newSessionId;
 
