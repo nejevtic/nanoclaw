@@ -1,0 +1,230 @@
+# https://github.com/vexxhost/atmosphere/blob/main/roles/openstack_helm_nova/vars/main.yml
+
+network:
+  ssh:
+    enabled: true
+    port: 8022
+    from_subnet: "${NOVA_COMPUTE_NODES_SUBNET}"
+    public_key: "${NOVA_COMPUTE_SSH_PUBLIC_KEY}"
+    key_types:
+      - rsa
+jobs:
+  archive_deleted_rows:
+    cron: "23 23 * * *"
+bootstrap:
+  structured:
+    flavors:
+      enabled: false
+pod:
+  replicas:
+    api_metadata: 3
+    osapi: 3
+    conductor: 3
+    scheduler: 3
+    novncproxy: 3
+    spiceproxy: 3
+  use_fqdn:
+    compute: false
+  mounts:
+    # Devs need to be mounted in the nova-compute
+    # so it can mount volumes on the hypervisor
+    nova_compute:
+      nova_compute:
+        volumeMounts:
+          - name: devs
+            mountPath: /dev
+        volumes:
+          - name: devs
+            hostPath:
+              path: /dev
+              type: Directory
+
+conf:
+  archive_deleted_rows:
+    # 1000 rows per run, until it finishes
+    # deleted rows more than one week old are put in shadow_table
+    # but never purged
+    all_cells: true
+    before:
+      # --before $(date "+%Y-%m-%d" --date="week ago")
+      date: "$(date '+%Y-%m-%d' --date='month ago')"
+      enabled: true
+    # max_rows:
+    #   enabled: false
+    #   rows: 1000
+    # purge_deleted_rows: false
+    until_completion: true
+  ceph:
+    enabled: false
+  paste:
+    composite:openstack_compute_api_v21:
+      keystone: cors http_proxy_to_wsgi compute_req_id faultwrap sizelimit authtoken keystonecontext osapi_compute_app_v21
+    composite:openstack_compute_api_v21_legacy_v2_compatible:
+      keystone: cors http_proxy_to_wsgi compute_req_id faultwrap sizelimit authtoken keystonecontext legacy_v2_compatible osapi_compute_app_v21
+    policy:
+      os_compute_api:servers:create:zero_disk_flavor: "rule:project_member_or_admin" # ENGINES-370 works together with max_local_block_devices to prompt errors requiring users to add --boot-from-volume when creating instances
+
+  # Uncomment following line to enable debug logging in all nova containers
+  # logging:
+  #   logger_nova:
+  #     level: DEBUG
+  nova:
+    DEFAULT:
+      # ENGINES-370 force users to create volume backed instances https://docs.openstack.org/nova/latest/user/block-device-mapping.html#faqs it is coupled with the os_compute_api:servers:create:zero_disk_flavor policy
+      max_local_block_devices: 0
+      # ENGINE-363 ENGINE-369 to avoid storage errors when block not ready
+      block_device_allocate_retries: 300
+      block_device_allocate_retries_interval: 10
+      allow_resize_to_same_host: true
+      # automatically confirm resize after 1 hour
+      resize_confirm_window: 3600
+      # Reserve 64GiB ram and 50GiB disk for the hypervisor.
+      reserved_host_memory_mb: 65536
+      reserved_host_disk_mb: 51200
+      # Overcommit config: https://confluence.switch.ch/display/EN/E2+-+Placement+-+Requirements
+      # the following three values need to be unset from helm chart default values.
+      # See https://helm.sh/docs/chart_template_guide/values_files/#deleting-a-default-key
+      cpu_allocation_ratio: null
+      ram_allocation_ratio: null
+      disk_allocation_ratio: null
+      initial_cpu_allocation_ratio: 4.0
+      initial_ram_allocation_ratio: 1.0
+      initial_disk_allocation_ratio: 1.0
+      #
+      resume_guests_state_on_host_boot: true
+      osapi_compute_workers: 8
+      metadata_workers: 8
+      vif_plugging_is_fatal: true
+      force_raw_images: true # ENGINE-363
+    cache:
+      backend: dogpile.cache.memcached
+    cinder:
+      catalog_info: volumev3::internalURL
+    conductor:
+      workers: 8
+    compute:
+      consecutive_build_service_disable_threshold: 0
+    cors:
+      allowed_origin: "*"
+      allow_headers: "X-Auth-Token,X-OpenStack-Nova-API-Version"
+    filter_scheduler:
+      enabled_filters:
+        ComputeFilter,
+        AggregateTypeAffinityFilter,
+        ComputeCapabilitiesFilter,
+        PciPassthroughFilter,
+        ImagePropertiesFilter,
+        ServerGroupAntiAffinityFilter,
+        ServerGroupAffinityFilter,
+        AggregateInstanceExtraSpecsFilter
+      image_properties_default_architecture: x86_64
+      # half of the host theoretical max capacity.
+      max_instances_per_host: 512
+    libvirt:
+      cpu_mode: custom
+      cpu_model: EPYC-Milan
+      # See https://manpages.debian.org/testing/qemu-system-common/qemu-cpu-models.7.en.html#amd
+      cpu_model_extra_flags: ibpb,virt-ssbd,amd-ssbd,pdpe1gb
+      # Clearer to specify this, even though it is default
+      virt_type: kvm
+      # Even though we support Qcow2 images, they get converted to RAW before reaching libvirt - Theoretically irrelevant with booting from attached volumes.
+      images_type: 'raw'
+      # ENGINE-363 ENGINE-369 required for the FC "host connector" to use multipath: true"
+      volume_use_multipath: True
+      # ENGINE-363 and linked.  5 is default. Until Copy-on-Write is fixed copying a volume takes time, and sometimes the volume is not ready in time, this solves the timeout issues.
+      num_volume_scan_tries: 60
+      # unset default values from helmchart
+      images_rbd_ceph_conf: null
+      images_rbd_pool: null
+      rbd_secret_uuid: null
+      rbd_user: null
+      hw_machine_type:
+        - "x86_64=q35"
+      num_memory_encrypted_guests: 0
+    pci:
+      alias:
+        type: multistring
+        values:
+          - '{ "vendor_id":"10de", "product_id":"2321", "device_type":"type-PF", "name":"NVIDIA-H100-94G", "numa_policy":"preferred"}'
+          - '{ "vendor_id":"10de", "product_id":"26b9", "device_type":"type-PF", "name":"NVIDIA-L40S-48G", "numa_policy":"preferred"}'
+    neutron:
+      metadata_proxy_shared_secret: "${METADATA_PROXY_SHARED_SECRET}"
+    oslo_messaging_notifications:
+      driver: noop
+    quota:
+      ram: 81920
+    scheduler:
+      workers: 8
+      enable_isolated_aggregate_filtering: true
+    service_user:
+      # Configure Nova to send the service user token
+      # This is enforced by Cinder in recent releases for security reasons
+      send_service_user_token: true
+  overrides:
+    nova_compute:
+      labels:
+      - label:
+          key: intel-gpu
+          values:
+          - "nvidia-h100-94gb"
+        conf:
+          nova:
+            DEFAULT:
+              initial_cpu_allocation_ratio: 1.0
+            libvirt:
+              cpu_mode: host-model
+              cpu_model: ""
+              cpu_model_extra_flags: ""
+            pci:
+              device_spec: '{ "vendor_id":"10de", "product_id":"2321"}'
+      - label:
+          key: gpu
+          values:
+          - "nvidia-l40s-48gb"
+        conf:
+          nova:
+            DEFAULT:
+              initial_cpu_allocation_ratio: 1.0
+            pci:
+              device_spec: '{ "vendor_id":"10de", "product_id":"26b9"}'
+      - label:
+          # genova cpu type
+          key: sev
+          values:
+          - "epyc-9554"
+        conf:
+          nova:
+            DEFAULT:
+              initial_cpu_allocation_ratio: 1.0
+            libvirt:
+              cpu_mode: host-model
+              cpu_model: ""
+              cpu_model_extra_flags: ""
+              # <= max_instances_per_host
+              num_memory_encrypted_guests: 512
+dependencies:
+  dynamic:
+    targeted:
+      openvswitch:
+        compute:
+          pod: []
+
+manifests:
+  cron_job_archive_deleted_rows: true
+  deployment_consoleauth: false
+  deployment_placement: false
+  ingress_metadata: false
+  ingress_novncproxy: false
+  ingress_osapi: false
+  ingress_placement: false
+  job_db_init_placement: false
+  job_ks_placement_endpoints: false
+  job_ks_placement_service: false
+  job_ks_placement_user: false
+  secret_keystone_placement: false
+  service_ingress_metadata: false
+  service_ingress_novncproxy: false
+  service_ingress_osapi: false
+  service_ingress_placement: false
+  service_placement: false
+  statefulset_compute_ironic: false

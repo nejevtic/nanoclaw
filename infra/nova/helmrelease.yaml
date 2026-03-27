@@ -1,0 +1,160 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: nova
+  namespace: nova
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: nova
+      # Pin to the chart version matching your nova image
+      # (cr.gitlab-int.switch.ch/.../nova:2024.1-main.20251119-14.01.07)
+      version: ">=0.1.0"
+      sourceRef:
+        kind: HelmRepository
+        name: openstack-helm
+        namespace: flux-system
+  valuesFrom:
+    - kind: ConfigMap
+      name: nova-values
+      valuesKey: nova-values.yaml
+
+  # ---------------------------------------------------------------------------
+  # pcihole64 patch for H100 GPU nodes
+  #
+  # Nova 29.4.0 does not implement hw:pcihole64, and libvirt 8.0.0 silently
+  # strips <pcihole64> for q35 machines.  H100L 94GB cards each need ~128GB
+  # BAR1; two GPUs require a 512GB (549755813888-byte) PCI hole.
+  #
+  # Fix: inject `-global q35-pcihost.pci-hole64-size=549755813888` as a raw
+  # QEMU arg via <qemu:commandline>.  Nova is patched at runtime by an init
+  # container that rewrites nova/virt/libvirt/config.py and driver.py before
+  # nova-compute starts.
+  #
+  # This postRenderer targets only nova-compute-intel-gpu-c2fd60e1 — the
+  # DaemonSet openstack-helm generates for nodes labelled intel-gpu=nvidia-h100-94gb.
+  # It has no effect on any other nova-compute DaemonSet.
+  # ---------------------------------------------------------------------------
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              name: nova-compute-intel-gpu-c2fd60e1
+              namespace: nova
+            patch: |
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nova-compute-intel-gpu-c2fd60e1
+              spec:
+                template:
+                  spec:
+                    volumes:
+                      - name: pcihole64-patches
+                        emptyDir: {}
+                      - name: pcihole64-pycache
+                        emptyDir: {}
+                    initContainers:
+                      - name: patch-pcihole64
+                        # Keep in sync with the nova_compute image in nova-values.yaml
+                        image: cr.gitlab-int.switch.ch/engines2/images/e2-custom-images/nova:2024.1-main.20251119-14.01.07
+                        securityContext:
+                          readOnlyRootFilesystem: true
+                          runAsUser: 0
+                        command:
+                          - python3
+                          - -c
+                          - |
+                            import re, sys
+                            from pathlib import Path
+
+                            import nova.virt.libvirt
+                            BASE = Path(nova.virt.libvirt.__path__[0])
+                            PATCHES = Path('/patches')
+
+                            print(f'[pcihole64] nova libvirt path: {BASE}')
+
+                            # --- 1. config.py: add qemu_args to LibvirtConfigGuest ---
+                            print('[1/2] Patching config.py ...')
+                            src = (BASE / 'config.py').read_text()
+                            if 'qemu_args' in src:
+                                print('  already patched')
+                            else:
+                                anchor = re.compile(
+                                    r'(class LibvirtConfigGuest\b.*?'
+                                    r'def __init__.*?self\.metadata\s*=\s*\[\])',
+                                    re.DOTALL)
+                                m = anchor.search(src)
+                                if not m:
+                                    sys.exit('ERROR: LibvirtConfigGuest.__init__ anchor not found')
+                                src = (src[:m.end()]
+                                       + '\n        self.qemu_args = []'
+                                       + src[m.end():])
+
+                                fmt = re.compile(
+                                    r'(class LibvirtConfigGuest\b.*?'
+                                    r'def format_dom\(self\).*?)'
+                                    r'(        return root\n)',
+                                    re.DOTALL)
+                                m2 = fmt.search(src)
+                                if not m2:
+                                    sys.exit('ERROR: format_dom return not found')
+                                injection = (
+                                    "        if self.qemu_args:\n"
+                                    "            qemu_ns = 'http://libvirt.org/schemas/domain/qemu/1.0'\n"
+                                    "            cmdline = etree.SubElement(root, '{%s}commandline' % qemu_ns)\n"
+                                    "            for val in self.qemu_args:\n"
+                                    "                arg_el = etree.SubElement(cmdline, '{%s}arg' % qemu_ns)\n"
+                                    "                arg_el.set('value', val)\n")
+                                src = src[:m2.start(2)] + injection + m2.group(2) + src[m2.end():]
+                                print('  done')
+                            (PATCHES / 'config.py').write_text(src)
+
+                            # --- 2. driver.py: inject qemu_args from hw:pcihole64 ---
+                            print('[2/2] Patching driver.py ...')
+                            src = (BASE / 'driver.py').read_text()
+                            if 'qemu_args' in src:
+                                print('  already patched')
+                            else:
+                                pat = re.compile(
+                                    r'(if\s+self\._guest_needs_pcie\(guest\)\s*:\s*\n(\s+))'
+                                    r'(self\._guest_add_pcie_root_ports\(guest'
+                                    r'(?:,\s*pcihole64=_pcihole64)?\))')
+                                m3 = pat.search(src)
+                                if not m3:
+                                    sys.exit('ERROR: _guest_needs_pcie call site not found')
+                                ind = m3.group(2)
+                                new_code = (
+                                    "_pcihole64 = flavor.extra_specs.get('hw:pcihole64')\n"
+                                    + ind + "LOG.warning('PCIHOLE64 extra_specs=%s val=%s', "
+                                            "flavor.extra_specs, _pcihole64)\n"
+                                    + ind + "self._guest_add_pcie_root_ports(guest)\n"
+                                    + ind + "if _pcihole64:\n"
+                                    + ind + "    guest.qemu_args.extend("
+                                            "['-global', 'q35-pcihost.pci-hole64-size=%s' "
+                                            "% _pcihole64])\n"
+                                    + ind + "    LOG.warning('PCIHOLE64 injected qemu_args=%s', "
+                                            "guest.qemu_args)")
+                                src = src[:m3.start()] + m3.group(1) + new_code + src[m3.end():]
+                                print('  done')
+                            (PATCHES / 'driver.py').write_text(src)
+
+                            (PATCHES / 'LIBVIRT_PATH').write_text(str(BASE))
+                            print(f'[pcihole64] patched files written to {PATCHES}')
+                        volumeMounts:
+                          - name: pcihole64-patches
+                            mountPath: /patches
+                    containers:
+                      - name: nova-compute
+                        volumeMounts:
+                          - name: pcihole64-patches
+                            mountPath: /var/lib/openstack/lib/python3.10/site-packages/nova/virt/libvirt/config.py
+                            subPath: config.py
+                          - name: pcihole64-patches
+                            mountPath: /var/lib/openstack/lib/python3.10/site-packages/nova/virt/libvirt/driver.py
+                            subPath: driver.py
+                          - name: pcihole64-pycache
+                            mountPath: /var/lib/openstack/lib/python3.10/site-packages/nova/virt/libvirt/__pycache__
