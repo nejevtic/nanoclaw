@@ -1,50 +1,101 @@
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
-  name: nova
-  namespace: nova
+  name: ${OS_SERVICE}
+  namespace: ${OS_SERVICE}
 spec:
-  interval: 1h
+  interval: 60s
   chart:
     spec:
-      chart: nova
-      # Pin to the chart version matching your nova image
-      # (cr.gitlab-int.switch.ch/.../nova:2024.1-main.20251119-14.01.07)
-      version: ">=0.1.0"
+      chart: ${OS_SERVICE}
+      version: 0.3.49
       sourceRef:
         kind: HelmRepository
         name: openstack-helm
         namespace: flux-system
+  install:
+    disableWait: true
+  upgrade:
+    disableWait: true
   valuesFrom:
-    - kind: ConfigMap
-      name: nova-values
-      valuesKey: nova-values.yaml
+  - kind: ConfigMap
+    name: ${OS_SERVICE}-values
+  - kind: ConfigMap
+    name: images-values
+  - kind: Secret
+    name: endpoints-values
+  - kind: Secret
+    name: ${OS_SERVICE}-secret-values
+  - kind: Secret
+    name: endpoints-nova-values
 
-  # ---------------------------------------------------------------------------
-  # pcihole64 patch for H100 GPU nodes
-  #
-  # Nova 29.4.0 does not implement hw:pcihole64, and libvirt 8.0.0 silently
-  # strips <pcihole64> for q35 machines.  H100L 94GB cards each need ~128GB
-  # BAR1; two GPUs require a 512GB (549755813888-byte) PCI hole.
-  #
-  # Fix: inject `-global q35-pcihost.pci-hole64-size=549755813888` as a raw
-  # QEMU arg via <qemu:commandline>.  Nova is patched at runtime by an init
-  # container that rewrites nova/virt/libvirt/config.py and driver.py before
-  # nova-compute starts.
-  #
-  # This postRenderer targets only nova-compute-intel-gpu-c2fd60e1 — the
-  # DaemonSet openstack-helm generates for nodes labelled intel-gpu=nvidia-h100-94gb.
-  # It has no effect on any other nova-compute DaemonSet.
-  # ---------------------------------------------------------------------------
+    # rabbitmq admin
+  - kind: Secret
+    name: rabbitmq-default-user
+    valuesKey: username
+    targetPath: endpoints.oslo_messaging.auth.admin.username
+  - kind: Secret
+    name: rabbitmq-default-user
+    valuesKey: password
+    targetPath: endpoints.oslo_messaging.auth.admin.password
+
   postRenderers:
+    # https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/patches/
+    # https://fluxcd.io/flux/components/helm/api/#helm.toolkit.fluxcd.io/v2.Kustomize
     - kustomize:
+        # workaround for bug in helm-toolkit.snippets.kubernetes_pod_rbac_roles
         patches:
-          - target:
-              apiVersion: apps/v1
+          - patch: |-
+              - op: replace
+                path: /subjects/0/namespace
+                value: ${OS_SERVICE}
+            target:
+              kind: RoleBinding
+          # SSH ID RSA is base64 encored due to issue substituting multilines vars
+          # The patch belows add an init container that will decode the key.
+          - patch: |-
+              - op: add
+                path: /spec/template/spec/initContainers/-
+                value:
+                  name: fix-ssh
+                  command: ["/bin/sh"]
+                  args:
+                    - -c
+                    - >-
+                      cp /var/lib/nova/.ssh/id_rsa /var/lib/nova/.ssh/id_rsa_encoded &&
+                      cat /var/lib/nova/.ssh/id_rsa_encoded | base64 -d > /var/lib/nova/.ssh/id_rsa &&
+                      chown -R nova:nova /var/lib/nova/.ssh
+                  image: ${IMAGE_NOVA}
+                  imagePullPolicy: IfNotPresent
+                  securityContext:
+                    runAsUser: 0
+                  volumeMounts:
+                  - mountPath: /var/lib/nova
+                    name: varlibnova
+            target:
               kind: DaemonSet
-              name: nova-compute-intel-gpu-c2fd60e1
-              namespace: nova
-            patch: |
+              name: nova-compute-[a-z0-9-]+
+          - patch: |-
+              - op: add
+                path: /spec/template/metadata/labels/elastic_app
+                value: "${OS_SERVICE}"
+            target:
+              kind: Deployment
+              labelSelector: "application=${OS_SERVICE}"
+
+          # pcihole64 fix for H100 GPU nodes (intel-gpu=nvidia-h100-94gb)
+          #
+          # Nova 29.4.0 ignores hw:pcihole64; libvirt 8.0.0 silently strips
+          # <pcihole64> for q35 machines. H100L 94GB needs ~128GB BAR1 each;
+          # 2 GPUs require 512GB (549755813888 bytes) PCI hole.
+          #
+          # Fix: init container rewrites nova/virt/libvirt/config.py and
+          # driver.py to inject `-global q35-pcihost.pci-hole64-size=<bytes>`
+          # via <qemu:commandline> when hw:pcihole64 is set in the flavor.
+          #
+          # Targets only nova-compute-intel-gpu-c2fd60e1 — the DaemonSet
+          # openstack-helm generates for nodes labelled intel-gpu=nvidia-h100-94gb.
+          - patch: |-
               apiVersion: apps/v1
               kind: DaemonSet
               metadata:
@@ -59,8 +110,8 @@ spec:
                         emptyDir: {}
                     initContainers:
                       - name: patch-pcihole64
-                        # Keep in sync with the nova_compute image in nova-values.yaml
-                        image: cr.gitlab-int.switch.ch/engines2/images/e2-custom-images/nova:2024.1-main.20251119-14.01.07
+                        image: ${IMAGE_NOVA}
+                        imagePullPolicy: IfNotPresent
                         securityContext:
                           readOnlyRootFilesystem: true
                           runAsUser: 0
@@ -158,3 +209,6 @@ spec:
                             subPath: driver.py
                           - name: pcihole64-pycache
                             mountPath: /var/lib/openstack/lib/python3.10/site-packages/nova/virt/libvirt/__pycache__
+            target:
+              kind: DaemonSet
+              name: nova-compute-intel-gpu-c2fd60e1
