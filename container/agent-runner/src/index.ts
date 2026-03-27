@@ -824,13 +824,19 @@ async function main(): Promise<void> {
   const geminiApiKey  = secrets.GEMINI_API_KEY  || process.env.GEMINI_API_KEY  || '';
   const geminiModel   = secrets.GEMINI_MODEL    || process.env.GEMINI_MODEL    || 'gemini-2.0-flash';
 
-  const backend: BackendConfig = {
-    type: activeBackend, ollamaBaseUrl, ollamaModel, oauthToken, geminiApiKey, geminiModel,
-  };
-  const activeModel = activeBackend === 'gemini' ? geminiModel
-                    : activeBackend === 'anthropic' ? '(claude-code-sdk)'
-                    : ollamaModel;
-  log(`Backend: ${activeBackend} | model: ${activeModel}`);
+  // Shared credentials for all backends
+  const baseConfig = { ollamaBaseUrl, ollamaModel, oauthToken, geminiApiKey, geminiModel };
+
+  // Fixed fallback priority: anthropic → gemini → ollama.
+  // Chain starts from the configured active backend; remaining backends are tried in order.
+  const FALLBACK_ORDER: Array<BackendConfig['type']> = ['anthropic', 'gemini', 'ollama'];
+  const startIdx = FALLBACK_ORDER.indexOf(activeBackend as BackendConfig['type']);
+  const orderedTypes = startIdx >= 0
+    ? [...FALLBACK_ORDER.slice(startIdx), ...FALLBACK_ORDER.slice(0, startIdx)]
+    : [...FALLBACK_ORDER];
+  const fallbackChain: BackendConfig[] = orderedTypes.map(type => ({ ...baseConfig, type }));
+
+  log(`Backend: ${activeBackend} | fallback chain: ${orderedTypes.join(' → ')}`);
 
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
   try { fs.unlinkSync(IPC_CLOSE_SENTINEL); } catch { /* ignore */ }
@@ -844,13 +850,36 @@ async function main(): Promise<void> {
   if (stale.length > 0) prompt += '\n' + stale.join('\n');
 
   let sessionId = input.sessionId;
+  // Start from the full chain; updated each turn to prefer the last working backend
+  let preferredChain = fallbackChain;
 
   try {
     while (true) {
       log(`Query start (session: ${sessionId || 'new'})`);
-      const result = backend.type === 'anthropic'
-        ? await runQueryWithClaudeSDK(prompt, sessionId, backend.oauthToken, input)
-        : await runQuery(prompt, sessionId, backend, input);
+
+      // Try each backend in order until one succeeds
+      let result: { newSessionId: string; closedDuringQuery: boolean; pendingIpc: string[] } | null = null;
+      let lastErr: unknown;
+      let succeededBackend: BackendConfig | null = null;
+      for (const b of preferredChain) {
+        try {
+          log(`Trying backend: ${b.type}`);
+          result = b.type === 'anthropic'
+            ? await runQueryWithClaudeSDK(prompt, sessionId, b.oauthToken, input)
+            : await runQuery(prompt, sessionId, b, input);
+          succeededBackend = b;
+          break;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log(`Backend ${b.type} failed: ${msg.slice(0, 300)}, trying next backend...`);
+          lastErr = err;
+        }
+      }
+      if (!result || !succeededBackend) throw lastErr ?? new Error('All backends failed');
+
+      // For subsequent turns, start from the backend that just worked
+      preferredChain = [succeededBackend, ...fallbackChain.filter(b => b.type !== succeededBackend!.type)];
+
       sessionId = result.newSessionId;
 
       if (result.closedDuringQuery) {
