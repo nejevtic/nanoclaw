@@ -129,21 +129,26 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channel (Telegram/WhatsApp/…) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
 Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
+- `src/channels/registry.ts` - Pluggable channel registry (Telegram, WhatsApp, …)
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
+- `src/credential-proxy.ts` - Secure credential forwarding to containers
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
+
+### workspace/
+
+`workspace/` is the agent's scratch space — git-ignored and never committed. When agents clone repositories or create project files they go here. Each project is a subdirectory (e.g. `workspace/my-project/`). `workspace/projects.json` tracks active projects and their container paths. SSH deploy keys for workspace repos live in `workspace/.ssh/`.
 
 ## FAQ
 

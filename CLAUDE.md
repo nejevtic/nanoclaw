@@ -4,14 +4,15 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with a pluggable channel registry (Telegram, WhatsApp, …), routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/registry.ts` | Pluggable channel registry |
+| `src/credential-proxy.ts` | Secure credential forwarding to containers |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
@@ -19,6 +20,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `infra/` | Infrastructure-as-code (OpenStack, K8s patches) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
 ## Skills
