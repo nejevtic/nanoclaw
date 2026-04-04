@@ -1,0 +1,2 @@
+.env.example merge=ours
+src/config.ts merge=ours

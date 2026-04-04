@@ -1,13 +1,19 @@
 # patch-h100.yaml
-# Permanent fix for hw:pcihole64 flavor extra_spec on q35 machines.
+# GPU fixes for H100 nodes via nova source patching.
 #
-# Problem: Nova 29.4.0 does not implement hw:pcihole64, and libvirt 8.0.0
-# silently strips <pcihole64> for pcie-root (q35). Large-BAR GPUs (H100L,
-# 128GB BAR1 each) fail with "PCI I/O region invalid" because the default
-# 2GB PCI hole is too small.
+# Two QEMU args injected via <qemu:commandline> when hw:pcihole64
+# is set in the flavor:
 #
-# Fix: Patch nova to inject `-global q35-pcihost.pci-hole64-size=<bytes>`
-# via <qemu:commandline> when hw:pcihole64 is set in the flavor.
+# 1. pcihole64: Nova 29.4.0 ignores hw:pcihole64; libvirt 8.0.0
+#    strips <pcihole64> for q35. H100L 94GB needs ~128GB BAR1 each;
+#    2 GPUs need 512GB (549755813888 bytes) PCI hole.
+#    Fix: `-global q35-pcihost.pci-hole64-size=<bytes>`
+#
+# 2. host-phys-bits: QEMU 8.2 defaults to 40-bit phys address space;
+#    980GB RAM + 512GB PCI hole needs 41+ bits. Nova's
+#    hw_maxphysaddr_mode=passthrough requires libvirt >= 8.7.0
+#    (we have 8.0.0, silently skipped).
+#    Fix: `-global host-x86_64-cpu.host-phys-bits=true`
 #
 # Integration: Add as a FluxCD HelmRelease postRenderer:
 #
@@ -128,7 +134,12 @@ spec:
                       + ind + "    guest.qemu_args.extend("
                               "['-global', 'q35-pcihost.pci-hole64-size=%s' "
                               "% _pcihole64])\n"
-                      + ind + "    LOG.warning('PCIHOLE64 injected qemu_args=%s', "
+                      + ind + "    # phys-bits fix: libvirt 8.0 < 8.7 required for\n"
+                      + ind + "    # hw_maxphysaddr_mode=passthrough; use -global to avoid\n"
+                      + ind + "    # conflicting with libvirt's own -cpu argument\n"
+                      + ind + "    guest.qemu_args.extend("
+                              "['-global', 'host-x86_64-cpu.host-phys-bits=true'])\n"
+                      + ind + "    LOG.warning('PCIHOLE64+PHYSBITS injected qemu_args=%s', "
                               "guest.qemu_args)")
                   src = src[:m3.start()] + m3.group(1) + new_code + src[m3.end():]
                   print('  done')
