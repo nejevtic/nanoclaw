@@ -4,7 +4,12 @@ import path from 'path';
 import { Api, Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { getActiveBackend, setActiveBackend, getActiveProject, setActiveProject } from '../db.js';
+import {
+  getActiveBackend,
+  setActiveBackend,
+  getActiveProject,
+  setActiveProject,
+} from '../db.js';
 import { logger } from '../logger.js';
 
 interface ProjectEntry {
@@ -86,9 +91,15 @@ export async function sendPoolMessage(
     try {
       await poolApis[idx].setMyName(sender);
       await new Promise((r) => setTimeout(r, 2000));
-      logger.info({ sender, groupFolder, poolIndex: idx }, 'Assigned and renamed pool bot');
+      logger.info(
+        { sender, groupFolder, poolIndex: idx },
+        'Assigned and renamed pool bot',
+      );
     } catch (err) {
-      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+      logger.warn(
+        { sender, err },
+        'Failed to rename pool bot (sending anyway)',
+      );
     }
   }
 
@@ -103,7 +114,10 @@ export async function sendPoolMessage(
         await api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
       }
     }
-    logger.info({ chatId, sender, poolIndex: idx, length: text.length }, 'Pool message sent');
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
   } catch (err) {
     logger.error({ chatId, sender, err }, 'Failed to send pool message');
   }
@@ -164,13 +178,17 @@ export class TelegramChannel implements Channel {
       }
 
       if (arg !== 'ollama' && arg !== 'anthropic' && arg !== 'gemini') {
-        ctx.reply(`Unknown backend "${arg}". Use: ollama, anthropic, or gemini`);
+        ctx.reply(
+          `Unknown backend "${arg}". Use: ollama, anthropic, or gemini`,
+        );
         return;
       }
 
       setActiveBackend(arg);
       logger.info({ backend: arg }, 'Backend switched via /backend command');
-      ctx.reply(`Switched to *${arg}* backend. Takes effect on next message.`, { parse_mode: 'Markdown' });
+      ctx.reply(`Switched to *${arg}* backend. Takes effect on next message.`, {
+        parse_mode: 'Markdown',
+      });
     });
 
     // Register one command per project (e.g. /swissvibe) plus /project off
@@ -193,7 +211,9 @@ export class TelegramChannel implements Channel {
 
       if (arg === 'off' || arg === 'none') {
         setActiveProject(chatJid, null);
-        ctx.reply('Active project cleared. No project context will be injected.');
+        ctx.reply(
+          'Active project cleared. No project context will be injected.',
+        );
         return;
       }
 
@@ -208,14 +228,18 @@ export class TelegramChannel implements Channel {
           lines.push(`• /${p.name} — ${p.displayName}${marker}`);
         }
         lines.push('');
-        lines.push(current && currentProject
-          ? `Active: *${currentProject.displayName}*`
-          : 'No active project. Use /\\<name\\> to set one.');
+        lines.push(
+          current && currentProject
+            ? `Active: *${currentProject.displayName}*`
+            : 'No active project. Use /\\<name\\> to set one.',
+        );
         ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
         return;
       }
 
-      ctx.reply(`Unknown project "${arg}". Use /project to see available projects.`);
+      ctx.reply(
+        `Unknown project "${arg}". Use /project to see available projects.`,
+      );
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -317,9 +341,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
+    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';

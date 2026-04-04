@@ -78,8 +78,12 @@ function buildProjectContext(chatJid: string): string {
   if (!projectName) return '';
   try {
     const projectsFile = path.join(process.cwd(), 'workspace', 'projects.json');
-    const projects = JSON.parse(fs.readFileSync(projectsFile, 'utf-8')).projects as Array<{
-      name: string; displayName: string; containerPath: string; description: string;
+    const projects = JSON.parse(fs.readFileSync(projectsFile, 'utf-8'))
+      .projects as Array<{
+      name: string;
+      displayName: string;
+      containerPath: string;
+      description: string;
     }>;
     const project = projects.find((p) => p.name === projectName);
     if (!project) return '';
@@ -612,10 +616,15 @@ function ensureContainerSystemRunning(): void {
     for (const name of orphans) {
       try {
         execSync(`docker stop ${name}`, { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');

@@ -149,15 +149,11 @@ function createSchema(database: Database.Database): void {
 
   // Add reply context columns if they don't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
     database.exec(
       `ALTER TABLE messages ADD COLUMN reply_to_message_content TEXT`,
     );
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reply_to_sender_name TEXT`);
   } catch {
     /* columns already exist */
   }
@@ -573,7 +569,9 @@ export function getActiveBackend(): 'ollama' | 'anthropic' | 'gemini' {
   return 'ollama';
 }
 
-export function setActiveBackend(backend: 'ollama' | 'anthropic' | 'gemini'): void {
+export function setActiveBackend(
+  backend: 'ollama' | 'anthropic' | 'gemini',
+): void {
   setRouterState('active_backend', backend);
 }
 
@@ -581,7 +579,10 @@ export function getActiveProject(chatJid: string): string | null {
   return getRouterState(`active_project:${chatJid}`) || null;
 }
 
-export function setActiveProject(chatJid: string, projectName: string | null): void {
+export function setActiveProject(
+  chatJid: string,
+  projectName: string | null,
+): void {
   setRouterState(`active_project:${chatJid}`, projectName ?? '');
 }
 
