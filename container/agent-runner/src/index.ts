@@ -1328,8 +1328,12 @@ async function main(): Promise<void> {
   const geminiApiKey  = secrets.GEMINI_API_KEY  || process.env.GEMINI_API_KEY  || '';
   const geminiModel   = secrets.GEMINI_MODEL    || process.env.GEMINI_MODEL    || 'gemini-2.0-flash';
 
-  // OneCLI credential proxy: credentials are injected via ANTHROPIC_BASE_URL
-  const sdkEnv: Record<string, string | undefined> = { ...process.env };
+  // OneCLI credential proxy: credentials are injected via ANTHROPIC_BASE_URL.
+  // CLAUDE_CODE_AUTO_COMPACT_WINDOW: 165k auto-compact threshold (upstream f77f9ce).
+  const sdkEnv: Record<string, string | undefined> = {
+    ...process.env,
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW: '165000',
+  };
 
   // SDK path: mcpServerPath for nanoclaw MCP server
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
