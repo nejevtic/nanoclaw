@@ -280,16 +280,22 @@ async function buildContainerArgs(
 
   // OneCLI gateway handles credential injection — containers never see real secrets.
   // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
+  // Race against a 2s timeout: if OneCLI is unreachable the SDK can hang forever
+  // on the HTTP call, blocking every container start. When the timeout wins we
+  // fall through and rely on credentials injected by readBackendEnvVars() below.
+  const onecliApplied = await Promise.race<boolean>([
+    onecli.applyContainerConfig(args, {
+      addHostMapping: false, // Nanoclaw already handles host gateway
+      agent: agentIdentifier,
+    }),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2000)),
+  ]).catch(() => false);
   if (onecliApplied) {
     logger.info({ containerName }, 'OneCLI gateway config applied');
   } else {
     logger.warn(
       { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+      'OneCLI gateway unreachable or timed out — falling back to .env credentials',
     );
   }
 
