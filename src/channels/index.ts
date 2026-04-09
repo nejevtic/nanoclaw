@@ -10,3 +10,6 @@
 // telegram
 
 // whatsapp
+
+// emacs
+import './emacs.js';
