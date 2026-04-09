@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: nova
+resources:
+  - ../base
+  - helmrelease-nova.yaml
+  - ingress-console.yaml
+  - nova-secret-values.yaml
+  - secret-endpoints-nova-values.yaml
+
+configMapGenerator:
+- name: nova-values
+  files:
+  - values.yaml=nova-values.yaml
+generatorOptions:
+  disableNameSuffixHash: true
