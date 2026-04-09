@@ -10,7 +10,9 @@ import {
   getActiveProject,
   setActiveProject,
 } from '../db.js';
+import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { ChannelOpts, registerChannel } from './registry.js';
 
 interface ProjectEntry {
   name: string;
@@ -430,3 +432,14 @@ export class TelegramChannel implements Channel {
     }
   }
 }
+
+registerChannel('telegram', (opts: ChannelOpts) => {
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const token =
+    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+  if (!token) {
+    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
+    return null;
+  }
+  return new TelegramChannel(token, opts);
+});

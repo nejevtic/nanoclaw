@@ -1385,7 +1385,7 @@ async function main(): Promise<void> {
         prompt: trimmedPrompt,
         options: {
           cwd: '/workspace/group',
-          resume: sessionId,
+          resume: input.sessionId,
           systemPrompt: undefined,
           allowedTools: [],
           env: sdkEnv,
@@ -1393,7 +1393,7 @@ async function main(): Promise<void> {
           allowDangerouslySkipPermissions: true,
           settingSources: ['project', 'user'] as const,
           hooks: {
-            PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+            PreCompact: [{ hooks: [createPreCompactHook(input.assistantName)] }],
           },
         },
       })) {
