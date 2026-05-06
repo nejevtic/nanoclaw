@@ -93,19 +93,33 @@ export async function sendPoolMessage(
         const MAX_LENGTH = 4096;
         const body = `*${sender}*: ${text}`;
         if (body.length <= MAX_LENGTH) {
-          await mainBotApi.sendMessage(numericId, body, { parse_mode: 'Markdown' });
+          await mainBotApi.sendMessage(numericId, body, {
+            parse_mode: 'Markdown',
+          });
         } else {
           for (let i = 0; i < body.length; i += MAX_LENGTH) {
-            await mainBotApi.sendMessage(numericId, body.slice(i, i + MAX_LENGTH));
+            await mainBotApi.sendMessage(
+              numericId,
+              body.slice(i, i + MAX_LENGTH),
+            );
           }
         }
-        logger.info({ chatId, sender, length: body.length }, 'Pool fallback sent via main bot');
+        logger.info(
+          { chatId, sender, length: body.length },
+          'Pool fallback sent via main bot',
+        );
       } catch (err) {
-        logger.error({ chatId, sender, err }, 'Failed to send pool fallback via main bot');
+        logger.error(
+          { chatId, sender, err },
+          'Failed to send pool fallback via main bot',
+        );
       }
       return;
     }
-    logger.warn({ sender }, 'No pool bots available and no main bot, cannot send pool message');
+    logger.warn(
+      { sender },
+      'No pool bots available and no main bot, cannot send pool message',
+    );
     return;
   }
 
