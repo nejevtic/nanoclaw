@@ -1317,16 +1317,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Multi-backend configuration: read active backend and credentials from secrets
+  // Multi-backend configuration: container-runner injects these as docker -e env vars
+  // (see src/container-runner.ts readBackendEnvVars). input.secrets is kept as a
+  // fallback path for callers that pass credentials on stdin instead.
   const secrets       = input.secrets || {};
-  const activeBackend = secrets.ACTIVE_BACKEND === 'anthropic' ? 'anthropic'
-                      : secrets.ACTIVE_BACKEND === 'gemini'    ? 'gemini'
+  const backendRaw    = process.env.ACTIVE_BACKEND || secrets.ACTIVE_BACKEND;
+  const activeBackend = backendRaw === 'anthropic' ? 'anthropic'
+                      : backendRaw === 'gemini'    ? 'gemini'
                       : 'ollama';
-  const ollamaBaseUrl = secrets.OLLAMA_BASE_URL || process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
-  const ollamaModel   = secrets.OLLAMA_MODEL    || process.env.OLLAMA_MODEL    || 'gpt-oss:latest';
-  const oauthToken    = secrets.CLAUDE_CODE_OAUTH_TOKEN || process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
-  const geminiApiKey  = secrets.GEMINI_API_KEY  || process.env.GEMINI_API_KEY  || '';
-  const geminiModel   = secrets.GEMINI_MODEL    || process.env.GEMINI_MODEL    || 'gemini-2.0-flash';
+  const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || secrets.OLLAMA_BASE_URL || 'http://localhost:11434';
+  const ollamaModel   = process.env.OLLAMA_MODEL    || secrets.OLLAMA_MODEL    || 'gpt-oss:latest';
+  const oauthToken    = process.env.CLAUDE_CODE_OAUTH_TOKEN || secrets.CLAUDE_CODE_OAUTH_TOKEN || '';
+  const geminiApiKey  = process.env.GEMINI_API_KEY  || secrets.GEMINI_API_KEY  || '';
+  const geminiModel   = process.env.GEMINI_MODEL    || secrets.GEMINI_MODEL    || 'gemini-2.0-flash';
 
   // OneCLI credential proxy: credentials are injected via ANTHROPIC_BASE_URL.
   // CLAUDE_CODE_AUTO_COMPACT_WINDOW: 165k auto-compact threshold (upstream f77f9ce).

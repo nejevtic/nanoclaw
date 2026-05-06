@@ -109,31 +109,36 @@ spec:
               (PATCHES / 'config.py').write_text(src)
 
               # --- 2. Patch driver.py: inject qemu_args from hw:pcihole64 ---
+              # Anchor at the final `return guest` of _get_guest_config so the
+              # injection runs for every guest build. Previous versions anchored
+              # inside `if self._guest_needs_pcie(guest):` which is skipped
+              # entirely when CONF.libvirt.num_pcie_ports=0 (the default) —
+              # causing the patch to be dead code.
               print('[2/2] Patching driver.py ...')
               src = (BASE / 'driver.py').read_text()
-              if 'qemu_args' in src:
+              if 'hw:pcihole64' in src:
                   print('  already patched')
               else:
-                  pat = re.compile(
-                      r'(if\s+self\._guest_needs_pcie\(guest\)\s*:\s*\n(\s+))'
-                      r'(self\._guest_add_pcie_root_ports\(guest'
-                      r'(?:,\s*pcihole64=_pcihole64)?\))')
-                  m3 = pat.search(src)
-                  if not m3:
-                      sys.exit('ERROR: _guest_needs_pcie call site not found')
-                  ind = m3.group(2)
-                  new_code = (
-                      "_pcihole64 = flavor.extra_specs.get('hw:pcihole64')\n"
-                      + ind + "LOG.warning('PCIHOLE64 extra_specs=%s val=%s', "
-                              "flavor.extra_specs, _pcihole64)\n"
-                      + ind + "self._guest_add_pcie_root_ports(guest)\n"
-                      + ind + "if _pcihole64:\n"
-                      + ind + "    guest.qemu_args.extend("
-                              "['-global', 'q35-pcihost.pci-hole64-size=%s' "
-                              "% _pcihole64])\n"
-                      + ind + "    LOG.warning('PCIHOLE64 injected qemu_args=%s', "
-                              "guest.qemu_args)")
-                  src = src[:m3.start()] + m3.group(1) + new_code + src[m3.end():]
+                  start = src.find('    def _get_guest_config(')
+                  if start < 0:
+                      sys.exit('ERROR: _get_guest_config not found')
+                  nxt = re.search(r'\n    def ', src[start + 1:])
+                  if not nxt:
+                      sys.exit('ERROR: end of _get_guest_config not found')
+                  end = start + 1 + nxt.start()
+                  ret_marker = '\n        return guest\n'
+                  ret_idx = src.rfind(ret_marker, start, end)
+                  if ret_idx < 0:
+                      sys.exit('ERROR: final `return guest` not found in _get_guest_config')
+                  insert_pos = ret_idx + 1  # after the leading \n
+                  injection = (
+                      "        _pcihole64 = flavor.extra_specs.get('hw:pcihole64')\n"
+                      "        if _pcihole64:\n"
+                      "            LOG.warning('PCIHOLE64 injecting qemu_args val=%s', _pcihole64)\n"
+                      "            guest.qemu_args.extend(\n"
+                      "                ['-global', 'q35-pcihost.pci-hole64-size=%s' % _pcihole64])\n"
+                  )
+                  src = src[:insert_pos] + injection + src[insert_pos:]
                   print('  done')
               (PATCHES / 'driver.py').write_text(src)
 

@@ -43,6 +43,10 @@ const poolApis: Api[] = [];
 const senderBotMap = new Map<string, number>();
 let nextPoolIndex = 0;
 
+// Reference to the main bot's Api, used as fallback when the pool is empty.
+// Set by TelegramChannel.connect(); read by sendPoolMessage().
+let mainBotApi: Api | null = null;
+
 /**
  * Initialize send-only Api instances for the bot pool.
  * Each pool bot can send messages but doesn't poll for updates.
@@ -79,7 +83,29 @@ export async function sendPoolMessage(
   groupFolder: string,
 ): Promise<void> {
   if (poolApis.length === 0) {
-    logger.warn({ sender }, 'No pool bots available, cannot send pool message');
+    if (mainBotApi) {
+      logger.warn(
+        { sender },
+        'No pool bots available — falling back to main bot',
+      );
+      try {
+        const numericId = chatId.replace(/^tg:/, '');
+        const MAX_LENGTH = 4096;
+        const body = `*${sender}*: ${text}`;
+        if (body.length <= MAX_LENGTH) {
+          await mainBotApi.sendMessage(numericId, body, { parse_mode: 'Markdown' });
+        } else {
+          for (let i = 0; i < body.length; i += MAX_LENGTH) {
+            await mainBotApi.sendMessage(numericId, body.slice(i, i + MAX_LENGTH));
+          }
+        }
+        logger.info({ chatId, sender, length: body.length }, 'Pool fallback sent via main bot');
+      } catch (err) {
+        logger.error({ chatId, sender, err }, 'Failed to send pool fallback via main bot');
+      }
+      return;
+    }
+    logger.warn({ sender }, 'No pool bots available and no main bot, cannot send pool message');
     return;
   }
 
@@ -145,6 +171,7 @@ export class TelegramChannel implements Channel {
 
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
+    mainBotApi = this.bot.api;
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {

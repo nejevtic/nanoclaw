@@ -257,6 +257,7 @@ function readBackendEnvVars(): Record<string, string> {
     'OLLAMA_MODEL',
     'GEMINI_API_KEY',
     'GEMINI_MODEL',
+    'CLAUDE_CODE_OAUTH_TOKEN',
   ]);
   // Active backend is toggled at runtime via /backend command and stored in DB
   vars.ACTIVE_BACKEND = getRouterState('active_backend') || 'ollama';
