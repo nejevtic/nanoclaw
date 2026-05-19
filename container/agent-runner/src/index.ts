@@ -3,7 +3,7 @@
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Supports multi-backend dispatch: Anthropic (Claude Agent SDK via OneCLI),
- * Gemini (OpenAI-compatible), and Ollama. Backend selected via ACTIVE_BACKEND
+ * OpenAI, Gemini (OpenAI-compatible), and Ollama. Backend selected via ACTIVE_BACKEND
  * secret. Anthropic uses the upstream SDK path with OneCLI credential proxy;
  * Ollama and Gemini use the direct API tool-call loop.
  *
@@ -104,12 +104,14 @@ interface HistoryFile {
 }
 
 interface BackendConfig {
-  type: 'ollama' | 'anthropic' | 'gemini';
+  type: 'ollama' | 'anthropic' | 'gemini' | 'openai';
   ollamaBaseUrl: string;
   ollamaModel: string;
   oauthToken: string;
   geminiApiKey: string;
   geminiModel: string;
+  openaiApiKey: string;
+  openaiModel: string;
 }
 
 interface ParsedMessage {
@@ -169,7 +171,12 @@ function shouldClose(): boolean {
   return false;
 }
 
-function drainIpcInput(): string[] {
+interface DrainResult {
+  messages: string[];
+  activeBackend?: string;
+}
+
+function drainIpcInput(): DrainResult {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs
@@ -178,6 +185,7 @@ function drainIpcInput(): string[] {
       .sort();
 
     const messages: string[] = [];
+    let activeBackend: string | undefined;
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
@@ -186,24 +194,32 @@ function drainIpcInput(): string[] {
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
         }
+        if (data.activeBackend) {
+          activeBackend = data.activeBackend;
+        }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         try { fs.unlinkSync(filePath); } catch { /* ignore */ }
       }
     }
-    return messages;
+    return { messages, activeBackend };
   } catch (err) {
     log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+    return { messages: [] };
   }
 }
 
-function waitForIpcMessage(): Promise<string | null> {
+interface IpcMessage {
+  text: string;
+  activeBackend?: string;
+}
+
+function waitForIpcMessage(): Promise<IpcMessage | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) { resolve(null); return; }
-      const messages = drainIpcInput();
-      if (messages.length > 0) { resolve(messages.join('\n')); return; }
+      const { messages, activeBackend } = drainIpcInput();
+      if (messages.length > 0) { resolve({ text: messages.join('\n'), activeBackend }); return; }
       setTimeout(poll, IPC_POLL_MS);
     };
     poll();
@@ -711,6 +727,36 @@ async function callGemini(
 }
 
 // ---------------------------------------------------------------------------
+// OpenAI (native API)
+// ---------------------------------------------------------------------------
+
+async function callOpenAI(
+  apiKey: string,
+  model: string,
+  messages: ChatMessage[],
+  tools: any[],
+): Promise<OllamaResponse> {
+  const res = await fetch(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({ model, messages, tools, stream: false }),
+    },
+  );
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI ${res.status}: ${body.slice(0, 400)}`);
+  }
+
+  return res.json() as Promise<OllamaResponse>;
+}
+
+// ---------------------------------------------------------------------------
 // Anthropic — Claude CLI subprocess (--print mode, uses CLAUDE_CODE_OAUTH_TOKEN)
 // ---------------------------------------------------------------------------
 
@@ -775,7 +821,7 @@ async function runQueryWithClaudeSDKCLI(
   const pollIpc = () => {
     if (ipcDone) return;
     if (shouldClose()) { closedDuringQuery = true; return; }
-    ipcBuffer.push(...drainIpcInput());
+    ipcBuffer.push(...drainIpcInput().messages);
     setTimeout(pollIpc, IPC_POLL_MS);
   };
   setTimeout(pollIpc, IPC_POLL_MS);
@@ -805,7 +851,7 @@ async function runQueryWithClaudeSDKCLI(
 
     const newSessionId = run.sessionId ?? crypto.randomUUID();
     writeOutput({ status: 'success', result: run.result, newSessionId });
-    return { newSessionId, closedDuringQuery, pendingIpc: [...ipcBuffer, ...drainIpcInput()] };
+    return { newSessionId, closedDuringQuery, pendingIpc: [...ipcBuffer, ...drainIpcInput().messages] };
   } finally {
     ipcDone = true;
   }
@@ -841,7 +887,7 @@ async function runQueryOllamaGemini(
   const pollIpc = () => {
     if (ipcDone) return;
     if (shouldClose()) { closedDuringQuery = true; ipcDone = true; return; }
-    ipcBuffer.push(...drainIpcInput());
+    ipcBuffer.push(...drainIpcInput().messages);
     setTimeout(pollIpc, IPC_POLL_MS);
   };
   setTimeout(pollIpc, IPC_POLL_MS);
@@ -851,7 +897,9 @@ async function runQueryOllamaGemini(
   try {
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       log(`LLM call ${i + 1} [${backend.type}] (${messages.length} messages)...`);
-      const res = backend.type === 'gemini'
+      const res = backend.type === 'openai'
+        ? await callOpenAI(backend.openaiApiKey, backend.openaiModel, messages, tools)
+        : backend.type === 'gemini'
         ? await callGemini(backend.geminiApiKey, backend.geminiModel, messages, tools)
         : await callOllama(backend.ollamaBaseUrl, backend.ollamaModel, messages, tools);
       const choice = res.choices[0];
@@ -887,7 +935,7 @@ async function runQueryOllamaGemini(
   writeOutput({ status: 'success', result: finalText, newSessionId: activeSessionId });
 
   // Collect any IPC that arrived during the query
-  const pendingIpc = [...ipcBuffer, ...drainIpcInput()];
+  const pendingIpc = [...ipcBuffer, ...drainIpcInput().messages];
 
   return { newSessionId: activeSessionId, closedDuringQuery, pendingIpc };
 }
@@ -1090,8 +1138,8 @@ async function runQuery(
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
-    for (const text of messages) {
+    const { messages: ipcMessages } = drainIpcInput();
+    for (const text of ipcMessages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
     }
@@ -1322,14 +1370,17 @@ async function main(): Promise<void> {
   // fallback path for callers that pass credentials on stdin instead.
   const secrets       = input.secrets || {};
   const backendRaw    = process.env.ACTIVE_BACKEND || secrets.ACTIVE_BACKEND;
-  const activeBackend = backendRaw === 'anthropic' ? 'anthropic'
+  let activeBackend: BackendConfig['type'] = backendRaw === 'anthropic' ? 'anthropic'
                       : backendRaw === 'gemini'    ? 'gemini'
+                      : backendRaw === 'openai'    ? 'openai'
                       : 'ollama';
   const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || secrets.OLLAMA_BASE_URL || 'http://localhost:11434';
   const ollamaModel   = process.env.OLLAMA_MODEL    || secrets.OLLAMA_MODEL    || 'gpt-oss:latest';
   const oauthToken    = process.env.CLAUDE_CODE_OAUTH_TOKEN || secrets.CLAUDE_CODE_OAUTH_TOKEN || '';
   const geminiApiKey  = process.env.GEMINI_API_KEY  || secrets.GEMINI_API_KEY  || '';
   const geminiModel   = process.env.GEMINI_MODEL    || secrets.GEMINI_MODEL    || 'gemini-2.0-flash';
+  const openaiApiKey  = process.env.OPENAI_API_KEY  || secrets.OPENAI_API_KEY  || '';
+  const openaiModel   = process.env.OPENAI_MODEL    || secrets.OPENAI_MODEL    || 'gpt-5.5';
 
   // OneCLI credential proxy: credentials are injected via ANTHROPIC_BASE_URL.
   // CLAUDE_CODE_AUTO_COMPACT_WINDOW: 165k auto-compact threshold (upstream f77f9ce).
@@ -1343,18 +1394,20 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   // Shared credentials for all backends
-  const baseConfig = { ollamaBaseUrl, ollamaModel, oauthToken, geminiApiKey, geminiModel };
+  const baseConfig = { ollamaBaseUrl, ollamaModel, oauthToken, geminiApiKey, geminiModel, openaiApiKey, openaiModel };
 
-  // Fixed fallback priority: anthropic → gemini → ollama.
-  // Chain starts from the configured active backend; remaining backends are tried in order.
-  const FALLBACK_ORDER: Array<BackendConfig['type']> = ['anthropic', 'gemini', 'ollama'];
-  const startIdx = FALLBACK_ORDER.indexOf(activeBackend as BackendConfig['type']);
-  const orderedTypes = startIdx >= 0
-    ? [...FALLBACK_ORDER.slice(startIdx), ...FALLBACK_ORDER.slice(0, startIdx)]
-    : [...FALLBACK_ORDER];
-  const fallbackChain: BackendConfig[] = orderedTypes.map(type => ({ ...baseConfig, type }));
+  const FALLBACK_ORDER: Array<BackendConfig['type']> = ['anthropic', 'openai', 'gemini', 'ollama'];
 
-  log(`Backend: ${activeBackend} | fallback chain: ${orderedTypes.join(' → ')}`);
+  function buildFallbackChain(primary: BackendConfig['type']): BackendConfig[] {
+    const startIdx = FALLBACK_ORDER.indexOf(primary);
+    const ordered = startIdx >= 0
+      ? [...FALLBACK_ORDER.slice(startIdx), ...FALLBACK_ORDER.slice(0, startIdx)]
+      : [...FALLBACK_ORDER];
+    log(`Backend: ${primary} | fallback chain: ${ordered.join(' → ')}`);
+    return ordered.map(type => ({ ...baseConfig, type }));
+  }
+
+  let fallbackChain = buildFallbackChain(activeBackend);
 
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
@@ -1366,7 +1419,7 @@ async function main(): Promise<void> {
     ? `[SCHEDULED TASK]\n\n${input.prompt}`
     : input.prompt;
 
-  const stale = drainIpcInput();
+  const stale = drainIpcInput().messages;
   if (stale.length > 0) prompt += '\n' + stale.join('\n');
 
   // --- Slash command handling ---
@@ -1522,13 +1575,19 @@ async function main(): Promise<void> {
         writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
         log('Query ended, waiting for next IPC message...');
-        const nextMessage = await waitForIpcMessage();
-        if (nextMessage === null) {
+        const nextIpc = await waitForIpcMessage();
+        if (nextIpc === null) {
           log('Close sentinel received, exiting');
           break;
         }
-        log(`Got new message (${nextMessage.length} chars), starting new query`);
-        prompt = nextMessage;
+        if (nextIpc.activeBackend && nextIpc.activeBackend !== activeBackend) {
+          activeBackend = nextIpc.activeBackend as BackendConfig['type'];
+          fallbackChain = buildFallbackChain(activeBackend);
+          preferredChain = fallbackChain;
+          log(`Backend hot-switched to: ${activeBackend}`);
+        }
+        log(`Got new message (${nextIpc.text.length} chars), starting new query`);
+        prompt = nextIpc.text;
       } else {
         // Use Ollama/Gemini path: direct API call with tool-call loop and fallback chain
         let result: { newSessionId: string; closedDuringQuery: boolean; pendingIpc: string[] } | null = null;
@@ -1573,14 +1632,20 @@ async function main(): Promise<void> {
         }
 
         log('Waiting for next IPC message...');
-        const next = await waitForIpcMessage();
-        if (next === null) {
+        const nextIpc = await waitForIpcMessage();
+        if (nextIpc === null) {
           log('Close sentinel received, exiting');
           break;
         }
+        if (nextIpc.activeBackend && nextIpc.activeBackend !== activeBackend) {
+          activeBackend = nextIpc.activeBackend as BackendConfig['type'];
+          fallbackChain = buildFallbackChain(activeBackend);
+          preferredChain = fallbackChain;
+          log(`Backend hot-switched to: ${activeBackend}`);
+        }
 
-        log(`Next message received (${next.length} chars)`);
-        prompt = next;
+        log(`Next message received (${nextIpc.text.length} chars)`);
+        prompt = nextIpc.text;
       }
     }
   } catch (err) {

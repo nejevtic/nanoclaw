@@ -214,15 +214,15 @@ export class TelegramChannel implements Channel {
       if (!arg) {
         const current = getActiveBackend();
         ctx.reply(
-          `Current backend: *${current}*\n\nSwitch with:\n/backend ollama\n/backend anthropic\n/backend gemini`,
+          `Current backend: *${current}*\n\nSwitch with:\n/backend ollama\n/backend anthropic\n/backend gemini\n/backend openai`,
           { parse_mode: 'Markdown' },
         );
         return;
       }
 
-      if (arg !== 'ollama' && arg !== 'anthropic' && arg !== 'gemini') {
+      if (arg !== 'ollama' && arg !== 'anthropic' && arg !== 'gemini' && arg !== 'openai') {
         ctx.reply(
-          `Unknown backend "${arg}". Use: ollama, anthropic, or gemini`,
+          `Unknown backend "${arg}". Use: ollama, anthropic, gemini, or openai`,
         );
         return;
       }

@@ -258,6 +258,8 @@ function readBackendEnvVars(): Record<string, string> {
     'GEMINI_API_KEY',
     'GEMINI_MODEL',
     'CLAUDE_CODE_OAUTH_TOKEN',
+    'OPENAI_API_KEY',
+    'OPENAI_MODEL',
   ]);
   // Active backend is toggled at runtime via /backend command and stored in DB
   vars.ACTIVE_BACKEND = getRouterState('active_backend') || 'ollama';
