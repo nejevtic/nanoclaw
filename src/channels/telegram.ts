@@ -220,7 +220,12 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      if (arg !== 'ollama' && arg !== 'anthropic' && arg !== 'gemini' && arg !== 'openai') {
+      if (
+        arg !== 'ollama' &&
+        arg !== 'anthropic' &&
+        arg !== 'gemini' &&
+        arg !== 'openai'
+      ) {
         ctx.reply(
           `Unknown backend "${arg}". Use: ollama, anthropic, gemini, or openai`,
         );

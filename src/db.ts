@@ -562,7 +562,11 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
-export function getActiveBackend(): 'ollama' | 'anthropic' | 'gemini' | 'openai' {
+export function getActiveBackend():
+  | 'ollama'
+  | 'anthropic'
+  | 'gemini'
+  | 'openai' {
   const val = getRouterState('active_backend');
   if (val === 'anthropic') return 'anthropic';
   if (val === 'gemini') return 'gemini';
