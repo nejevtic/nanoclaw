@@ -38,10 +38,18 @@ else
       brew install node@22
       ;;
     Linux)
+      # apt (and the nodesource script it drives) runs debconf, which on a
+      # live tty renders interactive dialogs — e.g. a "Pending kernel
+      # upgrade" <Ok> prompt — that block the whole setup until a human
+      # answers them. Non-interactive debconf always falls back to defaults,
+      # so scripted installs never wait on a terminal. `-E` carries the var
+      # into the nodesource script; `env` forces it past sudo's env_reset
+      # for the direct apt-get call.
+      export DEBIAN_FRONTEND=noninteractive
       echo "STEP: nodesource-setup"
       curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
       echo "STEP: apt-install-nodejs"
-      sudo apt-get install -y nodejs
+      sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
       ;;
     *)
       echo "STATUS: failed"
