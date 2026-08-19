@@ -67,7 +67,11 @@ describe('skill-directives parser, on the converted add-slack', () => {
 
   it('reads the dependency pinned exactly', () => {
     const dep = directives.find((d) => d.kind === 'dep')!;
-    expect(dep.body).toEqual(['@chat-adapter/slack@4.29.0']);
+    // Exact-semver pin (no range/latest). The *value* tracks the chat core and
+    // is checked separately by the drift-guard test below against our lockfile —
+    // we don't hard-code it here so the pin can move with the core.
+    expect(dep.body).toHaveLength(1);
+    expect(dep.body[0]).toMatch(/^@chat-adapter\/slack@\d+\.\d+\.\d+$/);
   });
 
   it('tags the runs with their effects', () => {

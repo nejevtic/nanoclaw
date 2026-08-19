@@ -31,11 +31,11 @@ export function createContainerConfig(config: ContainerConfigRow): void {
       `INSERT INTO container_configs (
         agent_group_id, provider, model, effort, image_tag, assistant_name,
         max_messages_per_prompt, skills, mcp_servers, packages_apt, packages_npm,
-        additional_mounts, cli_scope, timezone, updated_at
+        additional_mounts, cli_scope, timezone, env, updated_at
       ) VALUES (
         @agent_group_id, @provider, @model, @effort, @image_tag, @assistant_name,
         @max_messages_per_prompt, @skills, @mcp_servers, @packages_apt, @packages_npm,
-        @additional_mounts, @cli_scope, @timezone, @updated_at
+        @additional_mounts, @cli_scope, @timezone, @env, @updated_at
       )`,
     )
     .run(config);
@@ -121,6 +121,13 @@ export function updateContainerConfigJson(
   getDb()
     .prepare(`UPDATE container_configs SET ${column} = ?, updated_at = ? WHERE agent_group_id = ?`)
     .run(JSON.stringify(value), now, agentGroupId);
+}
+
+/** Set a group's env overrides (Record<string, string>) for provider contributions. */
+export function setContainerConfigEnv(agentGroupId: string, env: Record<string, string>): void {
+  getDb()
+    .prepare('UPDATE container_configs SET env = ?, updated_at = ? WHERE agent_group_id = ?')
+    .run(JSON.stringify(env), new Date().toISOString(), agentGroupId);
 }
 
 export function deleteContainerConfig(agentGroupId: string): void {

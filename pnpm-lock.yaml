@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@chat-adapter/telegram':
+        specifier: 4.38.1
+        version: 4.38.1
       '@clack/core':
         specifier: ^1.2.0
         version: 1.2.0
@@ -15,17 +18,17 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       '@onecli-sh/sdk':
-        specifier: 2.2.1
-        version: 2.2.1
+        specifier: 3.1.0
+        version: 3.1.0
       better-sqlite3:
         specifier: 11.10.0
         version: 11.10.0
       chat:
-        specifier: 4.29.0
-        version: 4.29.0
+        specifier: 4.38.1
+        version: 4.38.1
       cron-parser:
-        specifier: 5.5.0
-        version: 5.5.0
+        specifier: 5.10.0
+        version: 5.10.0
       kleur:
         specifier: ^4.1.5
         version: 4.1.5
@@ -71,6 +74,14 @@ importers:
         version: 4.1.4(@types/node@22.19.17)(vite@8.0.8(@types/node@22.19.17)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.9.0))
 
 packages:
+
+  '@chat-adapter/shared@4.38.1':
+    resolution: {integrity: sha512-zJiMl43fiS3a2RjLFdCyTUTqcDY2xss1Acbzc9yfsw8YAkS0LZRdrNmp9/RjLhZB0+FzLarNAayvdKqF2GwnQg==}
+    engines: {node: '>=20'}
+
+  '@chat-adapter/telegram@4.38.1':
+    resolution: {integrity: sha512-twFrW8s+2+93jBhKlLcuLudqD986jjJgLHjHGxHnRWqx20jKEx7BlGSgx/Y8jH1UAhOyPZGaJd6cYYoj07U4Lg==}
+    engines: {node: '>=20'}
 
   '@clack/core@1.2.0':
     resolution: {integrity: sha512-qfxof/3T3t9DPU/Rj3OmcFyZInceqj/NVtO9rwIuJqCUgh32gwPjpFQQp/ben07qKlhpwq7GzfWpST4qdJ5Drg==}
@@ -306,8 +317,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@onecli-sh/sdk@2.2.1':
-    resolution: {integrity: sha512-q2mCW4ZsARlLEoTxz/P0NQ4MiCh7Z2n28pxkSc7srS+tozyw40PdTnWYW7NI8hfSYplZTx5856Adq1iPi4KN3Q==}
+  '@onecli-sh/sdk@3.1.0':
+    resolution: {integrity: sha512-Akf4T32/pIGWJO0FQBwlPXYFUVMn200lFxWaZWtB8dNpORDjT7cMykd5W+aTA/4//YV1XiXBOoaTUUL1yqIf4w==}
     engines: {node: '>=20'}
 
   '@oxc-project/types@0.124.0':
@@ -612,14 +623,17 @@ packages:
   character-entities@2.0.2:
     resolution: {integrity: sha512-shx7oQ0Awen/BRIdkjkvz54PnEEI/EjwXDSIZp86/KKdbafHh1Df/RYGBhn4hbe2+uKC9FnT5UCEdyPz3ai9hQ==}
 
-  chat@4.29.0:
-    resolution: {integrity: sha512-KdPfzaie5ivYytyRICTERg5xT+LeCbYefokvNAqTHe92eqkFaoTMXXkSitikxJVWhZIb2YoXF1b9UZHyzSzKzw==}
+  chat@4.38.1:
+    resolution: {integrity: sha512-FD6vNLT8clXHKhN3I1m+3Bn2nz0rsB6/bmNPsJeh6Cr7kwWLg0MYl2uor9YaKBp38F77sBRVKdYKVA6ihUby3w==}
     engines: {node: '>=20'}
     peerDependencies:
-      ai: ^6.0.182
+      ai: ^6.0.182 || ^7.0.0
+      workflow: ^5.0.0-beta.35
       zod: ^3.0.0 || ^4.0.0
     peerDependenciesMeta:
       ai:
+        optional: true
+      workflow:
         optional: true
       zod:
         optional: true
@@ -640,8 +654,8 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
-  cron-parser@5.5.0:
-    resolution: {integrity: sha512-oML4lKUXxizYswqmxuOCpgFS8BNUJpIu6k/2HVHyaL8Ynnf3wdf9tkns0yRdJLSIjkJ+b0DXHMZEHGpMwjnPww==}
+  cron-parser@5.10.0:
+    resolution: {integrity: sha512-izNAxJyRWUP8ljBoDSub5WyrVOUlT4SLGShswE7eoRBpp6QUsSycYxLBMJlbshgPBMcPT/nrfgjNY2918ayv2A==}
     engines: {node: '>=18'}
 
   cross-spawn@7.0.6:
@@ -1510,6 +1524,25 @@ packages:
 
 snapshots:
 
+  '@chat-adapter/shared@4.38.1':
+    dependencies:
+      chat: 4.38.1
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
+  '@chat-adapter/telegram@4.38.1':
+    dependencies:
+      '@chat-adapter/shared': 4.38.1
+      chat: 4.38.1
+    transitivePeerDependencies:
+      - ai
+      - supports-color
+      - workflow
+      - zod
+
   '@clack/core@1.2.0':
     dependencies:
       fast-wrap-ansi: 0.1.6
@@ -1682,7 +1715,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@onecli-sh/sdk@2.2.1': {}
+  '@onecli-sh/sdk@3.1.0': {}
 
   '@oxc-project/types@0.124.0': {}
 
@@ -1980,7 +2013,7 @@ snapshots:
 
   character-entities@2.0.2: {}
 
-  chat@4.29.0:
+  chat@4.38.1:
     dependencies:
       '@workflow/serde': 4.1.0-beta.2
       mdast-util-to-string: 4.0.0
@@ -2004,7 +2037,7 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  cron-parser@5.5.0:
+  cron-parser@5.10.0:
     dependencies:
       luxon: 3.7.2
 

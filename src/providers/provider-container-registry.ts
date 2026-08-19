@@ -69,7 +69,13 @@ export interface ProviderHostCapabilities {
   readonly providesAgentSurfaces?: boolean;
 }
 
-export type ProviderContainerConfigFn = (ctx: ProviderContainerContext) => ProviderContainerContribution;
+/**
+ * Sync or async: providers needing async setup (DB reads, doc composition)
+ * may return a Promise; the consumer awaits either shape.
+ */
+export type ProviderContainerConfigFn = (
+  ctx: ProviderContainerContext,
+) => ProviderContainerContribution | Promise<ProviderContainerContribution>;
 
 interface RegistryEntry {
   fn: ProviderContainerConfigFn;

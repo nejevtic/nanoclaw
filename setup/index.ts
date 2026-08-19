@@ -28,6 +28,7 @@ const STEPS: Record<
   registry: () => import('./registry.js'),
   'registry-reconcile': () => import('./registry-reconcile.js'),
   // >>> nanoclaw:setup-steps
+  'pair-telegram': () => import('./pair-telegram.js'),
   // <<< nanoclaw:setup-steps
 };
 

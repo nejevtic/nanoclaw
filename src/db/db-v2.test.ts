@@ -478,6 +478,7 @@ describe('container configs', () => {
       additional_mounts: '[]',
       cli_scope: 'global',
       timezone: null,
+      env: '{}',
       updated_at: now(),
     });
     const row = getContainerConfig('ag-full');

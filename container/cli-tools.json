@@ -6,7 +6,15 @@
   },
   {
     "name": "@anthropic-ai/claude-code",
-    "version": "2.1.197",
+    "version": "2.1.235",
     "onlyBuilt": true
+  },
+  {
+    "name": "opencode-ai",
+    "version": "1.4.17"
+  },
+  {
+    "name": "@openai/codex",
+    "version": "0.138.0"
   }
 ]
