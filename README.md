@@ -24,7 +24,19 @@
 
 NanoClaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
 
-## Quick Start
+## This fork (deployment notes)
+
+> This private fork already ships the **Telegram, Codex, and OpenCode providers in-tree** — the payloads of the `/add-telegram`, `/add-codex`, and `/add-opencode` skills are committed here, so no skill install is needed. Clone **this fork** (not the public upstream) on a new machine:
+>
+> ```bash
+> git clone git@github.com:nejevtic/nanoclaw.git nanoclaw-v2
+> cd nanoclaw-v2
+> bash nanoclaw.sh        # foundation: Node/pnpm, Docker, agent image, OneCLI, Telegram, service
+> ```
+>
+> **`SETUP-STATUS.md` is the source of truth for this deployment** — the four agent groups (Main/Claude · GPT/OpenCodeGo · Local Qwen/Ollama · OpenAI/Codex), their per-group env, the OneCLI secret shapes (incl. the `type=anthropic` requirement), Telegram pairing + wiring, and gotchas **G1–G5** (OpenCodeGo quota, stuck OpenCode sessions, Codex window, wiring-row miss, the Qwen `Z.responses` transport fix). Read it before recreating on a fresh VM.
+
+## Quick Start (upstream)
 
 ```bash
 git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
