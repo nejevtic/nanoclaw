@@ -166,6 +166,8 @@ ncl wirings create --messaging-group-id <mg> --agent-group-id <ag> --engage-mode
 ```
 The bot must be **admin** in each group chat to read every message.
 
+**Adding agents later is routine, not surgery** — see `CREATING-AGENTS.md` (ask Main in Telegram, or the terminal route: create → provider → pair → wire → verify).
+
 **6. Smoke-test each chat** — per group: ping/pong, one real task, check `logs/nanoclaw.log` + `data/v2-sessions/<group>/…` on failure. Expect `G1` (OpenCodeGo quota) / `G3` (Codex window) quota replies on GPT + OpenAI = correct wiring, not a bug.
 
 **What genuinely needs you (can't be scripted):** creating the Telegram bot + sending pairing codes, the OneCLI secret values (Claude/Codex/OpenCodeGo tokens), and any quota resets. Everything else is in the repo + the commands above.

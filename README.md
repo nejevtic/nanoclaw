@@ -35,6 +35,8 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 > ```
 >
 > **`SETUP-STATUS.md` is the source of truth for this deployment** — the four agent groups (Main/Claude · GPT/OpenCodeGo · Local Qwen/Ollama · OpenAI/Codex), their per-group env, the OneCLI secret shapes (incl. the `type=anthropic` requirement), Telegram pairing + wiring, and gotchas **G1–G5** (OpenCodeGo quota, stuck OpenCode sessions, Codex window, wiring-row miss, the Qwen `Z.responses` transport fix). Read it before recreating on a fresh VM.
+>
+> **Want to add or change agents?** See **[`CREATING-AGENTS.md`](CREATING-AGENTS.md)** — the ask-a-step (in Telegram) and terminal routes, the per-agent provider table, verify steps, and gotchas.
 
 ## Quick Start (upstream)
 
