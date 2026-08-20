@@ -1,4 +1,4 @@
-# NanoClaw setup — status checkpoint (2026-08-18)
+# NanoClaw setup — status checkpoint (2026-08-18, updated 2026-08-20)
 
 > Resume point for finishing the NanoClaw install. Read top to bottom.
 
@@ -99,13 +99,15 @@ First real Claude call from the container → **401 "invalid x-api-key"** even t
 - **Fallback key**: user's `sk-proj-…` (org billing **$0** — `credit_balance_exhausted` on every completion) is kept in the vault as secret `OpenAI Codex` (`a66a5cfc-…`, host `api.openai.com`), NOT bound to any agent. Useful the moment the org is topped up: `onecli agents set-secrets --id <openai-agent-id> --secret-ids a66a5cfc-1a07-4dd6-8f60-fec07e0648af`.
 - How codex auth works here (no credential env at all): gateway serves the `~/.codex/auth.json` stub into the group's `.codex-shared` mount (host `src/providers/codex.ts`), MITM proxy (aoc agent token in `HTTPS_PROXY`) swaps the sentinel for the real vault credential on the wire. `CODEX_ENV_ALLOWLIST` deliberately strips `OPENAI_API_KEY` — auth rides the stub only.
 
-### Telegram wiring — FINAL (4 chats: 3 live, 1 pairing)
+### Telegram wiring — FINAL (6 chats)
 | Chat | messaging_group | agent group | model / endpoint |
 |---|---|---|---|
 | DM `telegram:1650895591` | `mg-1787134078792-qsyptu` | Main `ag-d441119a` (claude) | Claude Opus 5 (subscription) |
-| group `telegram:-1003959814938` | `mg-1787144119031-tm5qse` | GPT `ag-d4793d5a` (opencode) | `opencode/deepseek-v4-flash-free` @ `opencode.ai/zen/v1` (free tier) |
+| group `telegram:-1003959814938` | `mg-1787144119031-tm5qse` | GPT `ag-d4793d5a` (opencode) | `opencode-go/glm-5.3` @ `opencode.ai/zen/go/v1` (Go plan; quota-parked until ≈ Aug 23 — **G1**) |
 | group `telegram:-1003988096183` | `mg-1787147577309-etsg6b` | Local Qwen `ag-2049cb02` (opencode) | `openai/qwen3.8:27b` @ `http://10.114.0.91:11434/v1` |
-| group `telegram:-1003914446408` | `mg-1787151949379-bqzrod` | OpenAI (Codex) `ag-d2de9cbc` (codex) | ChatGPT Plus subscription (codex models; gateway-swapped) |
+| group `telegram:-1003914446408` | `mg-1787151949379-bqzrod` | OpenAI (Codex) `ag-d2de9cbc` (codex) | ChatGPT Plus subscription (codex models; gateway-swapped; quota **G3**) |
+| group `telegram:-1004477619551` | `mg-1787232598491-hfis2l` | Tech Lead `ag-1787228879565` (opencode) | `opencode-go/glm-5.3` @ `zen/go/v1` (Go plan; quota **G1**) |
+| group `telegram:-1004483965420` | `mg-1787235491363-xz97ic` | German Tutor `ag-aa72bc1a` (claude) | Claude subscription — persona: master German coach + Goethe/telc/TestDAF/DSH exam prep (persona in gitignored `groups/german-tutor/CLAUDE.md`) |
 
 **Pairing wiring gotcha (G4):** `pair-telegram --intent wire-to:<folder>` only **registers the chat**; the wiring row itself is a separate step — on the 4th chat the nohup'd setup waiter died before wiring and the user's first message had nowhere to route. Fix applied + general rule: after ANY pairing, verify `ncl wirings list` shows the row, else create it: `ncl wirings create --messaging-group-id <mg> --agent-group-id <ag> --engage-mode pattern --engage-pattern "."` (matching the other 3 chats).
 
@@ -113,9 +115,9 @@ All wirings `--engage-mode pattern --engage-pattern "."` (always-on, like a DM; 
 
 **G5 — Qwen (OpenAI-compatible / Ollama) "Z.responses is not a function" (code, fixed 2026-08-19, commit `3d933a`):** the opencode provider previously pinned `npm: '@ai-sdk/openai-compatible'` for the `openai` branch (Chat-Completions transport). OpenCode's `openai` provider **unconditionally** calls `provider.responses(model)` (the Responses API) — in 1.4.17 *and* the latest 1.18.18 — but `@ai-sdk/openai-compatible` only exposes `languageModel`/`chatModel`, **no `.responses`** → crash. **Fix:** removed the pin (`container/agent-runner/src/providers/opencode.ts`); OpenCode now uses its stock OpenAI provider, which speaks the Responses API that **this Ollama implements** (`/v1/responses` verified: returns `"pong"`). Regression-guarded by `opencode.config.test.ts` (asserts `provider.openai.npm === undefined`). If Qwen ever breaks again with `Z.responses`, the culprit is a re-introduced `openai-compatible` pin — do **not** "fix" it by pinning that package back.
 
-### ⚠⚠ Two more gotchas (learned 2026-08-19, do NOT re-learn)
+### ⚠⚠ Learned gotchas (do NOT re-learn)
 
-**G1 — OpenCodeGo quota/balance (external, not fixable here):** `gpt-5.6-luna` (Go plan) is **quota-limited (~4-day reset)** and the free-tier billing has **insufficient balance**. GPT-5.6 Luna is therefore **unavailable right now**. The GPT group runs `opencode/deepseek-v4-flash-free` (zen/v1, works). **When quota resets or balance is topped up**, flip back: set GPT group env to `OPENCODE_PROVIDER=opencode-go`, `OPENCODE_MODEL=opencode-go/gpt-5.6-luna`, `ANTHROPIC_BASE_URL=https://opencode.ai/zen/go/v1`, then `ncl groups restart` its group + clear its `continuation:opencode` (see G2). Free-tier catalog (zen/v1): claude-*, deepseek-v4, gemini-3.x, glm-5.x, gpt-5.6-luna/sol/terra, grok, kimi-k3, minimax-m3, qwen3.x.
+**G1 — OpenCodeGo quota/balance (external, not fixable here):** `gpt-5.6-luna` (Go plan) is **quota-limited (~4-day reset)** and the free-tier billing has **insufficient balance**. GPT-5.6 Luna is therefore **unavailable right now**. The GPT group runs `opencode/deepseek-v4-flash-free` (zen/v1, works). **When quota resets or balance is topped up**, flip back: set GPT group env to `OPENCODE_PROVIDER=opencode-go`, `OPENCODE_MODEL=opencode-go/gpt-5.6-luna`, `ANTHROPIC_BASE_URL=https://opencode.ai/zen/go/v1`, then `ncl groups restart` its group + clear its `continuation:opencode` (see G2). Free-tier catalog (zen/v1): claude-*, deepseek-v4, gemini-3.x, glm-5.x, gpt-5.6-luna/sol/terra, grok, kimi-k3, minimax-m3, qwen3.x. **Status 2026-08-20:** the **Go-plan weekly window is exhausted** — both Go-backed channels (GPT, Tech Lead, parked on `opencode-go/glm-5.3`) get HTTP **429 "Weekly usage limit reached. Resets in 3 days"** (≈ Aug 23); the config already points at `opencode-go/glm-5.3`, so it **auto-recovers at the reset** — no changes needed. `glm-5.3` exists **only in the Go catalog** (free tier tops out at `glm-5.2`) — verified live through the gateway: `onecli run -- curl https://opencode.ai/zen/go/v1/models`. If you need it working *right now*: enable balance-based usage from the URL in the 429 message (OpenCode workspace → Go), or flip both envs to free `opencode/glm-5.2` + `zen/v1` (remember **G2** reset per group).
 **AUTH:** the `opencode` (zen) endpoint validates **Bearer** strictly (even a valid `x-api-key` is rejected if a garbage Bearer is present) — I registered an **extra** OneCLI generic secret on `opencode.ai` injecting `Authorization: Bearer {value}` (in addition to the original `x-api-key` one) so both header styles carry the real key. Keep both.
 
 **G2 — Stuck OpenCode "continuation" pointer (silent no-reply):** OpenCode persists its session id as key `continuation:opencode` (value `ses_…`) in the **session's `outbound.db` → table `session_state`**. It is pinned to the model that was active when the session was created. **If you change a group's model while a session exists**, the resumed `ses_…` fails (`Model not found: …`) and the poll-loop **acks the message with NO delivery** (silent). **After any model change for a group, before the user's next message:**
@@ -129,9 +131,19 @@ Also, that state dir was created **root-owned** (`opencode-xdg` 0:0) → contain
 
 **G3 — ChatGPT-Plus Codex usage window (external quota, NOT an auth failure):** `codex exec` with the subscription auth returns `You've hit your usage limit. … try again at Aug 20th, 2026 7:32 AM` when the Plus Codex allotment for the current window is used. This is **expected behavior, not a wiring bug** — auth + model selection already succeeded (that error comes back from OpenAI after auth). Also: over a ChatGPT account only **codex models** are allowed (`gpt-5.1` etc. → `invalid_request_error: not supported when using Codex with a ChatGPT account`). Distinct from G1: G1 = OpenCodeGo's separate Go-plan quota; G3 = the user's own ChatGPT Plus Codex window. If the OpenAI group answers "usage limit", wait for the reset time printed in the error (or upgrade to Pro) — do not chase it as a bug.
 
+**G6 — new wirings are born SILENT: default `engage_mode=mention` (code, learned 2026-08-20):** `ncl wirings create` **without** an explicit `--engage-mode` falls back to the channel adapter's declaration = **`mention`** in groups → the agent answers only @mentions and **silently drops** everything else (German Tutor hit exactly this: paired, wired, zero response). Always create with **`--engage-mode pattern --engage-pattern "."`** — or fix afterwards: `ncl wirings update <wiring-id> --engage-mode pattern --engage-pattern "."`. Verify `ncl wirings list` shows `pattern` *before* telling the user to test.
+
+## DONE — 2026-08-20
+
+- **5th agent: Tech Lead** (folder `tech-lead`, `ag-1787228879565-aazl7e`) — created in-chat via Main (pairing `455139`, wiring `b1db5910-…`), provider `opencode`. Chat `telegram:-1004477619551` / `mg-1787232598491-hfis2l`.
+- **6th agent: German Tutor** (folder `german-tutor`, `ag-aa72bc1a-…`) — terminal route (`ncl groups create` + persona). Provider **`claude`** (empty → instance default; the strongest subscription for coaching). Persona in `groups/german-tutor/CLAUDE.md` (**gitignored** — back it up if you care): master German coach (corrections as *your version → correct → one-line rule → native rephrase*, i+1 pushing, "grammar-right but sounds foreign" flags), Goethe A1–C2 / telc / TestDAF / DSH exam prep with mock tasks + scoring, persistent error log in `memory/`, Telegram-short replies, German-first with English/Serbian explanation fallback. Chat `telegram:-1004483965420` / `mg-1787235491363-xz97ic`, wiring `310a6708-…` — created in **`mention` mode, corrected to `pattern .`** (gotcha **G6**).
+- **GPT + Tech Lead switched to Go-plan `glm-5.3`:** both envs now `OPENCODE_PROVIDER=opencode-go`, `OPENCODE_MODEL=opencode-go/glm-5.3`, `OPENCODE_SMALL_MODEL=opencode-go/glm-5.3`, `ANTHROPIC_BASE_URL=https://opencode.ai/zen/go/v1` (free-tier DeepSeek usage had expired; `glm-5.3` is Go-only). **G2** reset + restart on both.
+- **Live catalog verified through the gateway** (`onecli run -- curl <endpoint>/models`): Go tier = `glm-5.3/5.2/5.1/5`, `deepseek-v4-pro/flash`, `qwen3.5–3.8`, `minimax-m3`, `kimi-k3`, `gpt-5.6-luna`, `grok-4.5`, …; free tier (`zen/v1`) = 63 models, GLM tops out at **`glm-5.2`**.
+- **Go-plan quota exhausted as of 16:0x local 2026-08-20:** 429 on both Go channels ("Weekly usage limit reached. Resets in 3 days", ≈ **Aug 23**). Wiring + auth + model ID all verified (the 429 comes back *after* auth and model acceptance) — see **G1** status for recovery paths.
+
 ## Reproduce on a fresh VM (the "this VM dies" path)
 
-Target: **delete this VM → spin up an Ubuntu 24.04 VM (2+ CPU, ~8 GB RAM, passwordless sudo) → `git clone` the repo → all four chats up.** Everything deterministic below is already in the committed tree; only the secret/phone steps need you.
+Target: **delete this VM → spin up an Ubuntu 24.04 VM (2+ CPU, ~8 GB RAM, passwordless sudo) → `git clone` the repo → all core chats up (six on this deployment; step 3 also lists the optional extras).** Everything deterministic below is already in the committed tree; only the secret/phone steps need you.
 
 **0. Prereqs (one-time, same VM flavor):** Node 22 + pnpm (NodeSource), Docker, `make`+`g++` only if a native dep must compile from source (this stack ships prebuilt `better-sqlite3@11.10.0` — no compiler needed).
 
@@ -144,11 +156,11 @@ Idempotent; re-run any step via `NANOCLAW_SKIP=…` or the `/setup` agent skill.
 
 **2. Providers are in trunk — no branch juggling anymore.** `claude`, `codex`, and `opencode` (+ the Qwen `openai`-compatible path) all ship in the committed tree and in the built image. If you changed deps, rebuild: `./container/build.sh`.
 
-**3. Recreate the other 3 agent groups + per-group model** (after the service is up; the main/Claude group already exists from step 1). One group per provider/model — set provider + per-group env (migration `023`):
+**3. Recreate the other agent groups + per-group model** (after the service is up; the main/Claude group already exists from step 1). One group per provider/model — set provider + per-group env (migration `023`). The optional extras from this deployment: **Tech Lead** (same Go/glm-5.3 recipe) and **German Tutor** (provider `claude`; persona file `groups/german-tutor/CLAUDE.md` lives under gitignored `groups/` — recreate or back it up to reproduce).
 | Group | `openai|opencode|codex` provider | per-group env (`OPENCODE_PROVIDER` / `OPENCODE_MODEL` / `ANTHROPIC_BASE_URL`) |
 |---|---|---|
 | Main (DM) | `claude` | — (Claude subscription) |
-| GPT | `opencode` | `opencode` / `opencode/deepseek-v4-flash-free` / `https://opencode.ai/zen/v1` (see **G1** for the `gpt-5.6-luna` flip-back) |
+| GPT (and optional Tech Lead) | `opencode` | `opencode-go` / `opencode-go/glm-5.3` / `https://opencode.ai/zen/go/v1` (Go plan, quota **G1**; free fallback: `opencode` / `opencode/glm-5.2` / `https://opencode.ai/zen/v1`) |
 | Local Qwen | `opencode` | `openai` / `openai/qwen3.8:27b` / `http://<ollama-ip>:11434/v1` (see **G5** — do **not** pin `openai-compatible`) |
 | OpenAI (Codex) | `codex` | — (ChatGPT Plus subscription) |
 
@@ -161,8 +173,9 @@ Verify: `onecli agents list`.
 
 **5. Pair + wire each Telegram chat** — for each group chat: issue the 4-digit code (`pnpm exec tsx setup/index.ts --step pair-telegram --`), **you send those digits to the bot from the phone**, then **verify the wiring row exists** (gotcha **G4**):
 ```bash
-ncl wirings list
 ncl wirings create --messaging-group-id <mg> --agent-group-id <ag> --engage-mode pattern --engage-pattern "."
+#   ↑ do NOT omit --engage-mode: the default is "mention" → silent group chat (gotcha G6)
+ncl wirings list   # ← confirm the row says engage_mode=pattern
 ```
 The bot must be **admin** in each group chat to read every message.
 
@@ -173,6 +186,12 @@ The bot must be **admin** in each group chat to read every message.
 **What genuinely needs you (can't be scripted):** creating the Telegram bot + sending pairing codes, the OneCLI secret values (Claude/Codex/OpenCodeGo tokens), and any quota resets. Everything else is in the repo + the commands above.
 
 ## REMAINING (in order)
+
+> **SUPERSEDED (2026-08-20):** items 1–8 below were the initial plan and are all **done** (see the DONE sections). What is *actually* still open:
+>
+> 1. **External quota windows** — G1: Go-plan weekly reset ≈ **Aug 23** (GPT + Tech Lead auto-recover; or enable balance usage / drop to free `glm-5.2`). G3: ChatGPT-Plus Codex window reset was **Aug 20 ~7:32 AM** — the OpenAI group should work by now if it didn't.
+> 2. **Optional container-image bumps** (pin-to-newest-verified, lower priority): `container/cli-tools.json` — codex-cli 0.138.0→0.148.0, agent-browser 0.27.1→0.34.0; Dockerfile `ARG BUN_VERSION` 1.3.12→1.3.14; then `./container/build.sh` + container tests + `ncl groups restart`. (OpenCode 1.18.18 not needed for the Qwen path — it has the same strict `.responses` branch, see **G5**.)
+> 3. **better-sqlite3 stays 11.10.0** — no `make`/`g++` on the host to compile 13.x.
 
 1. **Gather credentials from the user** (not stored anywhere yet):
    - Anthropic: API key, or Claude OAuth (wizard's auth step handles the Claude Code OAuth token capture — `setup/register-claude-token.sh`).

@@ -13,7 +13,7 @@ and hook it to a Telegram chat — or point an existing chat at a different agen
 |---|---|---|
 | **Claude** | Claude Opus / Sonnet (subscription) | your Claude plan |
 | **OpenAI (Codex)** | codex models via ChatGPT account | ChatGPT Plus window (gotcha **G3**) |
-| **OpenCodeGo** | deepseek-v4-flash-free, gpt-5.6-luna, qwen3.x, gemini-3.x, kimi-k3, glm-5.x, … | free tier works; Go-plan models are quota-gated (gotcha **G1**) |
+| **OpenCodeGo** | free tier: glm-5.2, deepseek-v4-*, qwen3.5–3.8, minimax-m3, kimi-k3, …; **Go plan adds newer models** (glm-5.3, gpt-5.6-luna, …) | both tiers are quota-gated (gotcha **G1**); check the live per-model catalog: `onecli run -- curl https://opencode.ai/zen/{go/}v1/models` |
 | **Local Qwen** | `qwen3.8:27b` via Ollama | local compute — no quota |
 
 Any agent can use any of these — the provider is set **per agent group**, so you can have
@@ -70,7 +70,8 @@ ncl messaging-groups list --json                 # note the new mg-<id>
 ncl wirings create --messaging-group-id <mg> --agent-group-id <ag> \
     --engage-mode pattern --engage-pattern "."
 #   engage-pattern:  "."  = respond to every message   (bot must be admin)
-#                    "@bot" = mention-only
+#   ⚠ do NOT omit --engage-mode: `ncl wirings create` defaults to engage_mode=mention
+#     → silent group chat (only @mentions get answered) — gotcha G6 in SETUP-STATUS.md
 ```
 
 To **change the agent** of an existing wired chat instead:
@@ -79,7 +80,8 @@ To **change the agent** of an existing wired chat instead:
 ## Verify (always, after any create/wire)
 
 ```bash
-ncl wirings list            # the row must exist ← gotcha G4: pairing ≠ wiring
+ncl wirings list            # the row must exist            ← G4: pairing ≠ wiring
+                            #   AND say engage_mode=pattern ← G6: default is `mention` = silent
 tail -f logs/nanoclaw.log   # send a test message; watch route + container wake
 ```
 
@@ -97,3 +99,6 @@ DBs (did inbound land? did outbound produce?) + `logs/nanoclaw.error.log`.
   and Claude/Ollama are independent. A new agent doesn't dilute the old ones.
 - **Agent templates** (optional, upstream feature): `ncl groups create --template <ref>`
   stamps persona + MCP + skills from a bundle — see `docs/templates.md`.
+- **Proven on this deployment (2026-08-20):** `German Tutor` (Claude, terminal route — persona
+  in `groups/german-tutor/CLAUDE.md`) and `Tech Lead` (OpenCodeGo/go, in-chat route via Main).
+  Both paired, wired (`pattern .`), live.
