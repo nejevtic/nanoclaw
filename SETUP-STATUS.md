@@ -141,6 +141,21 @@ Also, that state dir was created **root-owned** (`opencode-xdg` 0:0) → contain
 - **Live catalog verified through the gateway** (`onecli run -- curl <endpoint>/models`): Go tier = `glm-5.3/5.2/5.1/5`, `deepseek-v4-pro/flash`, `qwen3.5–3.8`, `minimax-m3`, `kimi-k3`, `gpt-5.6-luna`, `grok-4.5`, …; free tier (`zen/v1`) = 63 models, GLM tops out at **`glm-5.2`**.
 - **Go-plan quota exhausted as of 16:0x local 2026-08-20:** 429 on both Go channels ("Weekly usage limit reached. Resets in 3 days", ≈ **Aug 23**). Wiring + auth + model ID all verified (the 429 comes back *after* auth and model acceptance) — see **G1** status for recovery paths.
 
+## DONE — 2026-10-22 (service resurrection + German Tutor persona restored)
+
+**Incident found:** ALL bots silent since **2026-10-19 17:33 CEST**. Chain:
+1. The service had been running continuously since the August setup — but on its first restart *after* the local commits went in (setup stamp recorded commit `1a34c0ae`; checkout later at `907f140a`), the startup tripwire (`src/upgrade-state.ts`) refused to boot: `data/upgrade-state.json` didn't match the checkout identity. First failure: 2026-10-19 15:32 UTC.
+2. Crash loop since, escalating backoff (15-min cap, `data/circuit-breaker.json` attempt 7 by Oct 22 ~14:50 UTC). German Tutor's last live session was the same day, 12:18–12:20 CEST.
+3. German Tutor was already degraded *before* the outage: at its **first spawn** (2026-08-20 16:22, fragment mtimes) `composeGroupClaudeMd` regenerated `groups/german-tutor/CLAUDE.md` as imports-only — the original persona text (per the 2026-08-20 entry) lived in that file and was **overwritten on every spawn**. The tutor kept functioning afterwards on `memory/` alone (conversations Aug 23 – Oct 14, memory writes Oct 19). The canonical persona location in this code is **`groups/<folder>/instructions.prepend.md`** (`PERSONA_PREPEND_FILE`; composed as the FIRST CLAUDE.md import) — the file was missing.
+
+**Fix applied (2026-10-22 ~15:15 CEST):**
+1. `pnpm exec tsx scripts/upgrade-state.ts set` — stamped the marker at the current checkout (documented local-customization override, `docs/upgrade-recovery.md`): commit `907f140a` / tree `9500c29d…`, v2.2.0, `via:manual`.
+2. Deleted `data/circuit-breaker.json` (root cause fixed; avoids the 15-min backoff).
+3. `systemctl --user restart nanoclaw-v2-2a38bd3e` → `NanoClaw running`: Telegram polling up (bot @llmclient_bot), OneCLI approval handler, ncl socket; OneCLI gateway + postgres healthy.
+4. **German Tutor persona re-created** (lost text was unrecoverable — `groups/` is gitignored, no backup): new `groups/german-tutor/instructions.prepend.md`, reconstructed from the 2026-08-20 persona description above + observed tutor behavior in `groups/german-tutor/conversations/` + `memory/student.md` (German-first including meta messages since 2026-09-04, Swiss formal correspondence, FIDE → Goethe B2 goals). Compose verified: group `CLAUDE.md` now imports `.claude-fragments/persona.md` first.
+
+**RULE for all groups (do NOT re-learn):** never write a persona into `groups/<folder>/CLAUDE.md` — the host regenerates that file on every spawn. Personas go in `groups/<folder>/instructions.prepend.md` (survives compose; imported first). The 2026-08-20 German Tutor entry ("persona in groups/german-tutor/CLAUDE.md") is historical; the canonical file is the prepend file now.
+
 ## Reproduce on a fresh VM (the "this VM dies" path)
 
 Target: **delete this VM → spin up an Ubuntu 24.04 VM (2+ CPU, ~8 GB RAM, passwordless sudo) → `git clone` the repo → all core chats up (six on this deployment; step 3 also lists the optional extras).** Everything deterministic below is already in the committed tree; only the secret/phone steps need you.
